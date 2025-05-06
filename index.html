@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>8-Direction Click-to-Move Game</title>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.85.2/dist/phaser.min.js"></script>
+    <style>
+        body { margin: 0; }
+        canvas { display: block; margin: auto; }
+    </style>
+</head>
+<body>
+
+<script>
+const config = {
+    type: Phaser.AUTO,
+    width: 800,
+    height: 600,
+    backgroundColor: '#000000',
+    physics: {
+        default: 'arcade',
+        arcade: {
+            debug: false
+        }
+    },
+    scene: {
+        preload,
+        create,
+        update
+    }
+};
+
+const game = new Phaser.Game(config);
+
+let player, target = null, speed = 100;
+
+function preload() {
+    this.load.image('background', 'assets/background1.png');
+    this.load.spritesheet('character', 'assets/character.png', {
+        frameWidth: 32,
+        frameHeight: 32
+    });
+}
+
+function create() {
+    this.add.image(400, 300, 'background').setOrigin(0.5, 0.5);
+
+    player = this.physics.add.sprite(400, 300, 'character', 0);
+    player.setCollideWorldBounds(true);
+    player.setDepth(1); // Ensure player is above background
+
+    const directions = ['up', 'upR', 'right', 'downR', 'down', 'downL', 'left', 'upL'];
+    directions.forEach((dir, i) => {
+        this.anims.create({
+            key: dir,
+            frames: this.anims.generateFrameNumbers('character', { start: i * 8, end: i * 8 + 7 }),
+            frameRate: 10,
+            repeat: -1
+        });
+    });
+
+    this.input.on('pointerdown', (pointer) => {
+        target = { x: pointer.worldX, y: pointer.worldY };
+    });
+}
+
+function update() {
+    if (!target) return;
+
+    const distX = target.x - player.x;
+    const distY = target.y - player.y;
+    const distance = Phaser.Math.Distance.Between(player.x, player.y, target.x, target.y);
+
+    if (distance < 2) {
+        player.setVelocity(0);
+        player.anims.stop();
+        if (player.anims.currentAnim) {
+            const lastFrame = player.anims.currentAnim.frames[7];
+            player.setFrame(lastFrame.frame.name);
+        }
+        target = null;
+        return;
+    }
+
+    const angle = Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y);
+    const velocity = this.physics.velocityFromRotation(angle, speed);
+    player.setVelocity(velocity.x, velocity.y);
+
+    const deg = Phaser.Math.RadToDeg(angle);
+    const directionNames = ['down', 'downR', 'right', 'upR', 'up', 'upL', 'left', 'downL'];
+    let dirIndex = Phaser.Math.Wrap(Math.round((deg + 180) / 45), 0, 8);
+    const anim = directionNames[dirIndex];
+
+    if (!player.anims.isPlaying || player.anims.currentAnim.key !== anim) {
+        player.anims.play(anim, true);
+    }
+}
+</script>
+
+</body>
+</html>
