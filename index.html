@@ -44,6 +44,14 @@ function preload() {
 
 function create() {
 
+    this.debugText = this.add.text(10, 10, '', {
+    font: '16px Courier',
+    fill: '#00ff00',
+    backgroundColor: '#000000',
+    padding: { x: 4, y: 2 }
+});
+this.debugText.setScrollFactor(0); // keep it fixed on screen
+
     this.debugArrow = this.add.graphics({ lineStyle: { width: 2, color: 0xff0000 } });
     this.add.image(400, 300, 'background').setOrigin(0.5, 0.5);
 
@@ -96,6 +104,7 @@ function update() {
     const directionNames = ['up', 'upR', 'right', 'downR', 'down', 'downL', 'left', 'upL'];
     const dirIndex = Phaser.Math.Wrap(Math.round((deg + 180) / 45), 0, 8);
     const anim = directionNames[dirIndex];
+    this.debugText.setText(`Direction: ${anim}`);
 
     if (!player.anims.isPlaying || player.anims.currentAnim.key !== anim) {
         player.anims.play(anim, true);
