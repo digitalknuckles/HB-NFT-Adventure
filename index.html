@@ -63,7 +63,7 @@ const directions = ['up', 'upR', 'right', 'downR', 'down', 'downL', 'left', 'upL
 for (let i = 0; i < directions.length; i++) {
     this.anims.create({
         key: directions[i],
-        frames: this.anims.generateFrameNumbers('player', { start: i * 8, end: i * 8 + 7 }),
+        frames: this.anims.generateFrameNumbers('character', { start: i * 8, end: i * 8 + 7 }),
         frameRate: 8,
         repeat: -1
     });
