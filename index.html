@@ -91,7 +91,7 @@ function update() {
 
     // Correct mapping for your sprite sheet
     const deg = Phaser.Math.RadToDeg(angle);
-    const directionNames = ['down', 'downR', 'right', 'upR', 'up', 'upL', 'left', 'downL'];
+    const directionNames = ['up', 'upR', 'right', 'downR', 'down', 'downL', 'left', 'upL'];
     const dirIndex = Phaser.Math.Wrap(Math.round((deg + 180) / 45), 0, 8);
     const anim = directionNames[dirIndex];
 
