@@ -59,7 +59,7 @@ this.debugText.setScrollFactor(0); // keep it fixed on screen
     player.setCollideWorldBounds(true);
     player.setDepth(1); // Ensure player is above background
 
-const directions = ['up', 'upR', 'right', 'downR', 'down', 'downL', 'left', 'upL'];
+const directions = ['right', 'downR', 'up', 'upL', 'down', 'upL', 'downL', 'upR'];
 directions.forEach((dir, i) => {
     this.anims.create({
         key: dir,
