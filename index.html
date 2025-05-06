@@ -87,19 +87,6 @@ function update() {
         return;
     }
 
-    this.debugArrow.clear();
-
-const arrowLength = 40;
-const endX = player.x + Math.cos(angle) * arrowLength;
-const endY = player.y + Math.sin(angle) * arrowLength;
-
-// Draw line from player to target direction
-this.debugArrow.lineStyle(2, 0xff0000);
-this.debugArrow.beginPath();
-this.debugArrow.moveTo(player.x, player.y);
-this.debugArrow.lineTo(endX, endY);
-this.debugArrow.strokePath();
-
     const angle = Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y);
     const velocity = this.physics.velocityFromRotation(angle, speed);
     player.setVelocity(velocity.x, velocity.y);
@@ -112,6 +99,19 @@ this.debugArrow.strokePath();
 
     if (!player.anims.isPlaying || player.anims.currentAnim.key !== anim) {
         player.anims.play(anim, true);
+
+            this.debugArrow.clear();
+
+const arrowLength = 40;
+const endX = player.x + Math.cos(angle) * arrowLength;
+const endY = player.y + Math.sin(angle) * arrowLength;
+
+// Draw line from player to target direction
+this.debugArrow.lineStyle(2, 0xff0000);
+this.debugArrow.beginPath();
+this.debugArrow.moveTo(player.x, player.y);
+this.debugArrow.lineTo(endX, endY);
+this.debugArrow.strokePath();
     }
 }
 </script>
