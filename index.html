@@ -59,17 +59,15 @@ this.debugText.setScrollFactor(0); // keep it fixed on screen
     player.setCollideWorldBounds(true);
     player.setDepth(1); // Ensure player is above background
 
-const directions = ['right', 'downR', 'up', 'upL', 'down', 'upL', 'downL', 'upR'];
-directions.forEach((dir, i) => {
+const directions = ['up', 'upR', 'right', 'downR', 'down', 'downL', 'left', 'upL'];
+for (let i = 0; i < directions.length; i++) {
     this.anims.create({
-        key: dir,
-        frames: this.anims.generateFrameNumbers('character', {
-            start: i * 8,
-            end: i * 8 + 7
-        }),
-        frameRate: 10,
+        key: directions[i],
+        frames: this.anims.generateFrameNumbers('player', { start: i * 8, end: i * 8 + 7 }),
+        frameRate: 8,
         repeat: -1
     });
+}
 });
 
     this.input.on('pointerdown', (pointer) => {
