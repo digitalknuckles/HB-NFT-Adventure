@@ -2,31 +2,14 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>RTS Worker Economy Prototype</title>
+<title>RTS Worker Economy MVP</title>
 
 <script src="https://cdn.jsdelivr.net/npm/phaser@3.85.2/dist/phaser.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/easystarjs@0.4.4/bin/easystar-0.4.4.min.js"></script>
 
 <style>
-    body {
-        margin: 0;
-        background: #111;
-        user-select: none;
-    }
-    canvas {
-        display: block;
-        margin: auto;
-        border: 1px solid #333;
-    }
-    #ui {
-        position: absolute;
-        top: 10px;
-        left: 10px;
-        color: #0f0;
-        font-family: monospace;
-        font-size: 14px;
-        white-space: pre-line;
-    }
+    body { margin: 0; background: #111; user-select: none; }
+    canvas { display: block; margin: auto; border: 1px solid #333; }
+    #ui { position: absolute; top: 10px; left: 10px; color: #0f0; font-family: monospace; font-size: 14px; }
 </style>
 </head>
 
@@ -37,12 +20,9 @@
 /* =========================
    CONFIG
 ========================= */
-const TILE_SIZE = 32;
-const GRID_W = 25;
-const GRID_H = 19;
-
 const WORKER_COST = 100;
 const WORKER_COOLDOWN = 5000;
+const MOVE_SPEED = 100;
 
 const RESOURCE_TYPES = [
     { key: 'tree', value: 300, interval: 500 },
@@ -65,18 +45,12 @@ new Phaser.Game(config);
 ========================= */
 let workers = [];
 let resources = [];
-let buildings = [];
 let selectedWorkers = [];
 let bucket;
-
 let dragStart = null;
 let selectionGraphics;
-
 let buyBtn, buyText;
 let uiDiv = document.getElementById('ui');
-
-let grid = [];
-let easystar;
 
 /* =========================
    PRELOAD
@@ -87,7 +61,6 @@ function preload() {
     this.load.image('rock', 'assets/rock.png');
     this.load.image('crystal', 'assets/crystal.png');
     this.load.image('bucket', 'assets/bucket.png');
-    this.load.image('building', 'assets/building.png');
     this.load.image('select', 'assets/select.png');
     this.load.spritesheet('character','assets/character.png',{ frameWidth:32, frameHeight:32 });
 }
@@ -98,13 +71,9 @@ function preload() {
 function create() {
     this.add.image(400, 300, 'background').setDepth(-10);
 
-    buildGrid();
-    setupPathfinding();
-
     bucket = this.physics.add.staticSprite(400, 300, 'bucket');
     bucket.storage = { tree: 0, rock: 0, crystal: 0 };
 
-    spawnBuilding(this, 400, 150);
     spawnWorker(this, 360, 340);
     spawnWorker(this, 440, 340);
 
@@ -114,11 +83,10 @@ function create() {
 
     selectionGraphics = this.add.graphics().setDepth(1000);
 
-    /* -------- INPUT -------- */
-
-    // LEFT CLICK SELECT / DRAG
+    // LEFT CLICK SELECTION
     this.input.on('pointerdown', pointer => {
         if (pointer.rightButtonDown()) return;
+
         dragStart = { x: pointer.worldX, y: pointer.worldY };
         selectedWorkers = [];
     });
@@ -127,50 +95,51 @@ function create() {
         if (!dragStart) return;
         selectionGraphics.clear();
         selectionGraphics.lineStyle(1, 0x00ff00);
-        selectionGraphics.strokeRect(
-            dragStart.x,
-            dragStart.y,
-            pointer.worldX - dragStart.x,
-            pointer.worldY - dragStart.y
-        );
+        selectionGraphics.strokeRect(dragStart.x, dragStart.y, pointer.worldX - dragStart.x, pointer.worldY - dragStart.y);
     });
 
     this.input.on('pointerup', pointer => {
-        if (!dragStart || pointer.rightButtonDown()) return;
+        if (pointer.rightButtonDown()) return; // skip right-click
 
-        const rect = new Phaser.Geom.Rectangle(
-            Math.min(dragStart.x, pointer.worldX),
-            Math.min(dragStart.y, pointer.worldY),
-            Math.abs(pointer.worldX - dragStart.x),
-            Math.abs(pointer.worldY - dragStart.y)
-        );
+        if (dragStart) {
+            const rect = new Phaser.Geom.Rectangle(
+                Math.min(dragStart.x, pointer.worldX),
+                Math.min(dragStart.y, pointer.worldY),
+                Math.abs(pointer.worldX - dragStart.x),
+                Math.abs(pointer.worldY - dragStart.y)
+            );
 
-        workers.forEach(w => {
-            if (Phaser.Geom.Rectangle.Contains(rect, w.sprite.x, w.sprite.y)) {
-                selectedWorkers.push(w);
-            }
-        });
+            workers.forEach(w => {
+                if (Phaser.Geom.Rectangle.Contains(rect, w.sprite.x, w.sprite.y)) {
+                    selectedWorkers.push(w);
+                }
+            });
 
-        selectionGraphics.clear();
-        dragStart = null;
-    });
-
-    // RIGHT CLICK COMMAND (MOVE or HARVEST)
-    this.input.on('pointerup', pointer => {
-        if (!pointer.rightButtonReleased()) return;
-
-        const objects = this.input.hitTestPointer(pointer);
-
-        // Harvest resource
-        if (objects.length && objects[0].resource) {
-            commandHarvest(objects[0].resource);
-        } else {
-            // Move formation
-            issueFormationMove(pointer.worldX, pointer.worldY);
+            console.log("Selected workers:", selectedWorkers.length);
+            selectionGraphics.clear();
+            dragStart = null;
         }
     });
 
-    /* -------- BUY BUTTON -------- */
+    // RIGHT CLICK MOVE / HARVEST
+    this.input.on('pointerup', pointer => {
+        if (!pointer.rightButtonReleased()) return;
+
+        selectedWorkers.forEach(w => {
+            // check if clicked on resource
+            let targetResource = resources.find(r => Phaser.Geom.Rectangle.Contains(r.sprite.getBounds(), pointer.worldX, pointer.worldY));
+            if (targetResource) {
+                w.target = targetResource;
+                w.state = 'MOVING_TO_HARVEST';
+            } else {
+                // move to arbitrary position
+                w.target = { x: pointer.worldX, y: pointer.worldY };
+                w.state = 'MOVING';
+            }
+        });
+    });
+
+    // BUY WORKER BUTTON
     buyBtn = this.add.rectangle(700, 50, 90, 30, 0x4444ff).setInteractive();
     buyText = this.add.text(655, 42, 'Buy Worker', { font: '14px Arial', fill: '#fff' });
     buyBtn.cooldown = 0;
@@ -186,52 +155,35 @@ function create() {
 }
 
 /* =========================
-   GRID & PATHFINDING
+   SPAWN FUNCTIONS
 ========================= */
-function buildGrid() {
-    grid = Array(GRID_H).fill().map(() => Array(GRID_W).fill(0));
-}
-
-function setupPathfinding() {
-    easystar = new EasyStar.js();
-    easystar.setGrid(grid);
-    easystar.setAcceptableTiles([0]);
-    easystar.enableDiagonals();
-}
-
-/* =========================
-   SPAWNERS
-========================= */
-function spawnBuilding(scene, x, y) {
-    const b = scene.physics.add.staticSprite(x, y, 'building');
-    buildings.push(b);
-    markGridBlocked(x, y);
-}
-
 function spawnWorker(scene, x, y) {
     const sprite = scene.physics.add.sprite(x, y, 'character', 0).setInteractive();
 
     sprite.worker = {
         sprite,
-        path: [],
         inventory: 0,
         maxCarry: 20,
-        harvesting: null,
         harvestingType: null,
         lastResource: null,
+        target: null,
         state: 'IDLE',
         selection: scene.add.image(x, y, 'select').setVisible(false)
     };
 
     workers.push(sprite.worker);
-    scene.physics.add.collider(sprite, buildings);
+
     scene.physics.add.overlap(sprite, bucket, () => {
         const w = sprite.worker;
         if (w.inventory > 0) {
             bucket.storage[w.harvestingType] += w.inventory;
+            console.log("Delivered", w.inventory, w.harvestingType);
             w.inventory = 0;
             w.harvestingType = null;
-            if (w.lastResource?.value > 0) moveWorkerTo(w, w.lastResource.sprite.x, w.lastResource.sprite.y);
+            if (w.lastResource && w.lastResource.value > 0) {
+                w.target = w.lastResource;
+                w.state = 'MOVING_TO_HARVEST';
+            } else w.state = 'IDLE';
         }
     });
 }
@@ -245,135 +197,94 @@ function spawnRandomResource(scene) {
     );
 
     const bar = scene.add.graphics();
-    const resource = { sprite, type: t.key, value: t.value, max: t.value, interval: t.interval, timer: 0, bar };
+    const resource = { sprite, ...t, max: t.value, timer: 0, bar };
     sprite.resource = resource;
     resources.push(resource);
 }
 
 /* =========================
-   MOVEMENT & FORMATION
-========================= */
-function issueFormationMove(x, y) {
-    const cols = Math.ceil(Math.sqrt(selectedWorkers.length));
-    selectedWorkers.forEach((w, i) => {
-        const ox = (i % cols) * 24;
-        const oy = Math.floor(i / cols) * 24;
-        moveWorkerTo(w, x + ox, y + oy);
-        w.state = 'MOVING';
-        w.harvesting = null;
-    });
-}
-
-function moveWorkerTo(worker, x, y) {
-    const sx = Math.floor(worker.sprite.x / TILE_SIZE);
-    const sy = Math.floor(worker.sprite.y / TILE_SIZE);
-    const ex = Math.floor(x / TILE_SIZE);
-    const ey = Math.floor(y / TILE_SIZE);
-
-    easystar.findPath(sx, sy, ex, ey, path => {
-        if (path) worker.path = path;
-    });
-    easystar.calculate();
-}
-
-/* =========================
-   HARVEST COMMAND
-========================= */
-function commandHarvest(resource) {
-    selectedWorkers.forEach(w => {
-        w.harvesting = resource;
-        w.harvestingType = resource.type;
-        w.lastResource = resource;
-        moveWorkerTo(w, resource.sprite.x, resource.sprite.y);
-        w.state = 'MOVING';
-    });
-}
-
-/* =========================
-   UPDATE LOOP
+   UPDATE
 ========================= */
 function update(time, delta) {
-    easystar.calculate();
-
-    // Update UI
     uiDiv.innerText =
         `TREE: ${bucket.storage.tree}\n` +
         `ROCK: ${bucket.storage.rock}\n` +
         `CRYSTAL: ${bucket.storage.crystal}`;
 
-    // Buy button cooldown
-    if (buyBtn.cooldown > 0) buyBtn.cooldown -= delta;
+    if (buyBtn.cooldown > 0) {
+        buyBtn.cooldown -= delta;
+        buyBtn.setFillStyle(0x222222);
+    } else buyBtn.setFillStyle(0x4444ff);
 
     workers.forEach(w => {
         const s = w.sprite;
         w.selection.setPosition(s.x, s.y).setVisible(selectedWorkers.includes(w));
 
-        // MOVE ALONG PATH
-        if (w.path.length > 0) {
-            const node = w.path[0];
-            const tx = node.x * TILE_SIZE + TILE_SIZE/2;
-            const ty = node.y * TILE_SIZE + TILE_SIZE/2;
-            const d = Phaser.Math.Distance.Between(s.x, s.y, tx, ty);
-            if (d < 4) w.path.shift();
+        // MOVEMENT
+        if (w.state === 'MOVING' && w.target) {
+            const dx = w.target.x - s.x;
+            const dy = w.target.y - s.y;
+            const dist = Phaser.Math.Distance.Between(s.x, s.y, w.target.x, w.target.y);
+            if (dist < 4) { w.state='IDLE'; w.target=null; s.setVelocity(0,0); }
             else {
-                const a = Phaser.Math.Angle.Between(s.x, s.y, tx, ty);
-                s.setVelocity(Math.cos(a)*100, Math.sin(a)*100);
-            }
-        } else {
-            s.setVelocity(0);
-
-            // START HARVESTING IF AT RESOURCE
-            if (w.harvesting && w.state !== 'HARVESTING') {
-                const r = w.harvesting;
-                if (r.value > 0 && Phaser.Math.Distance.Between(s.x, s.y, r.sprite.x, r.sprite.y) < 20) {
-                    w.state = 'HARVESTING';
-                    r.timer = 0;
-                }
+                const angle = Math.atan2(dy, dx);
+                s.setVelocity(Math.cos(angle)*MOVE_SPEED, Math.sin(angle)*MOVE_SPEED);
             }
         }
 
-        // HARVEST LOGIC
-        if (w.state === 'HARVESTING' && w.harvesting) {
-            const r = w.harvesting;
-            r.timer += delta;
+        // HARVESTING
+        if (w.state === 'MOVING_TO_HARVEST' && w.target) {
+            const r = w.target;
+            const dist = Phaser.Math.Distance.Between(s.x, s.y, r.sprite.x, r.sprite.y);
+            if (dist < 6) {
+                w.state = 'HARVESTING';
+                w.harvestingType = r.type;
+                w.lastResource = r;
+                w.target = null;
+            } else {
+                const angle = Math.atan2(r.sprite.y - s.y, r.sprite.x - s.x);
+                s.setVelocity(Math.cos(angle)*MOVE_SPEED, Math.sin(angle)*MOVE_SPEED);
+            }
+        }
 
-            // draw bar
+        if (w.state === 'HARVESTING' && w.lastResource) {
+            const r = w.lastResource;
+            r.timer += delta;
             r.bar.clear();
-            const p = r.timer / r.interval;
             r.bar.fillStyle(0x00ff00);
-            r.bar.fillRect(r.sprite.x-20, r.sprite.y-30, 40*p, 5);
+            r.bar.fillRect(r.sprite.x - 20, r.sprite.y - 30, 40 * Math.min(1, r.timer/r.interval), 5);
 
             if (r.timer >= r.interval) {
                 r.timer = 0;
                 const amt = Math.min(5, r.value, w.maxCarry - w.inventory);
                 r.value -= amt;
                 w.inventory += amt;
-                r.sprite.setScale(r.value/r.max);
+
+                r.sprite.setScale(r.value / r.max);
 
                 if (w.inventory >= w.maxCarry || r.value <= 0) {
                     w.state = 'MOVING';
-                    moveWorkerTo(w, bucket.x, bucket.y);
+                    w.target = bucket;
+                    w.lastResource = r.value>0 ? r : null;
                 }
 
-                if (r.value <= 0) {
-                    r.bar.destroy();
-                    r.sprite.destroy();
-                    resources = resources.filter(x=>x!==r);
-                    spawnRandomResource(w.sprite.scene);
-                }
+                if (r.value <= 0) destroyResource(r);
             }
         }
     });
 }
 
 /* =========================
-   GRID HELPERS
+   RESOURCE HELPERS
 ========================= */
-function markGridBlocked(x, y) {
-    const gx = Math.floor(x / TILE_SIZE);
-    const gy = Math.floor(y / TILE_SIZE);
-    if (grid[gy] && grid[gy][gx] !== undefined) grid[gy][gx] = 1;
+function destroyResource(r) {
+    r.bar.destroy();
+    r.sprite.destroy();
+    resources = resources.filter(x => x!==r);
+    console.log("Resource destroyed, respawning...");
+    spawnRandomResource(r.sprite.scene);
 }
 </script>
+
 </body>
 </html>
