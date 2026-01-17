@@ -16,130 +16,179 @@ const config = {
     type: Phaser.AUTO,
     width: 800,
     height: 600,
-    backgroundColor: '#000000',
-    physics: {
-        default: 'arcade',
-        arcade: { debug: false }
-    },
+    physics: { default: 'arcade', arcade: { debug: false }},
     scene: { preload, create, update }
 };
 
-const game = new Phaser.Game(config);
+new Phaser.Game(config);
 
-let player, target = null, speed = 100;
-let resourceNode, harvestBucket;
+let workers = [];
+let resources = [];
+let selectedWorkers = [];
+let bucket;
+
+const RESOURCE_TYPES = [
+    { key: 'tree', value: 300, interval: 500 },
+    { key: 'rock', value: 500, interval: 900 },
+    { key: 'crystal', value: 800, interval: 1400 }
+];
 
 function preload() {
-    this.load.image('background', 'assets/background1.png');
-    this.load.image('resource', 'assets/resource.png');     // placeholder image
-    this.load.image('bucket', 'assets/bucket.png');         // placeholder image
-    this.load.spritesheet('character', 'assets/character.png', {
-        frameWidth: 32,
-        frameHeight: 32
-    });
+    this.load.image('tree', 'assets/resource.png');
+    this.load.image('rock', 'assets/rock.png');
+    this.load.image('crystal', 'assets/crystal.png');
+    this.load.image('bucket', 'assets/bucket.png');
+    this.load.image('select', 'assets/select.png');
+    this.load.spritesheet('character','assets/character.png',{ frameWidth:32, frameHeight:32 });
 }
 
 function create() {
-    this.add.image(400, 300, 'background').setOrigin(0.5);
+    bucket = this.physics.add.staticSprite(400, 300, 'bucket');
+    bucket.stored = 0;
 
-    // Debug UI
-    this.debugText = this.add.text(10, 10, '', {
-        font: '16px Courier',
-        fill: '#00ff00',
-        backgroundColor: '#000000',
-        padding: { x: 4, y: 2 }
-    }).setScrollFactor(0);
+    spawnWorker(this, 360, 320);
+    spawnWorker(this, 440, 320);
 
-    // Player
-    player = this.physics.add.sprite(400, 300, 'character', 0);
-    player.setCollideWorldBounds(true);
-    player.inventory = 0;
-    player.maxCarry = 20;
+    spawnRandomResource(this);
+    spawnRandomResource(this);
+    spawnRandomResource(this);
 
-    // Resource Node
-    resourceNode = this.physics.add.staticSprite(200, 200, 'resource');
-    resourceNode.value = 300;
-
-    // Harvest Bucket
-    harvestBucket = this.physics.add.staticSprite(600, 400, 'bucket');
-    harvestBucket.stored = 0;
-
-    // Animations
-    const directions = ['up','upR','right','downR','down','downL','left','upL'];
-    for (let i = 0; i < directions.length; i++) {
-        this.anims.create({
-            key: directions[i],
-            frames: this.anims.generateFrameNumbers('character', {
-                start: i * 8,
-                end: i * 8 + 7
-            }),
-            frameRate: 8,
-            repeat: -1
-        });
-    }
-
-    // Collisions
-    this.physics.add.overlap(player, resourceNode, harvestResource, null, this);
-    this.physics.add.overlap(player, harvestBucket, depositResource, null, this);
-
-    // Click handling
     this.input.on('pointerdown', (pointer, objects) => {
-        if (objects.length > 0) {
-            target = objects[0]; // resource or bucket
+        if (!pointer.event.shiftKey) selectedWorkers = [];
+
+        objects.forEach(obj => {
+            if (obj.worker) {
+                selectedWorkers.push(obj.worker);
+            }
+        });
+
+        if (objects[0]?.resource) {
+            selectedWorkers.forEach(w => w.setTarget(objects[0].resource));
+        } else if (objects[0] === bucket) {
+            selectedWorkers.forEach(w => w.setTarget(bucket));
         } else {
-            target = { x: pointer.worldX, y: pointer.worldY };
+            selectedWorkers.forEach(w => w.moveTo(pointer.worldX, pointer.worldY));
         }
     });
 }
 
-function harvestResource(player, resource) {
-    if (player.inventory >= player.maxCarry || resource.value <= 0) return;
+function spawnWorker(scene, x, y) {
+    const sprite = scene.physics.add.sprite(x, y, 'character', 0);
+    sprite.worker = {
+        sprite,
+        inventory: 0,
+        maxCarry: 20,
+        state: 'IDLE',
+        target: null,
+        harvesting: null,
+        timer: 0,
+        selection: scene.add.image(x, y, 'select').setVisible(false),
 
-    const amount = Math.min(20, resource.value);
-    player.inventory += amount;
-    resource.value -= amount;
+        setTarget(target) {
+            this.target = target;
+            this.state = 'MOVING';
+        },
+        moveTo(x, y) {
+            this.target = { x, y };
+            this.state = 'MOVING';
+        }
+    };
 
-    target = harvestBucket;
+    workers.push(sprite.worker);
+
+    scene.physics.add.overlap(sprite, bucket, () => {
+        if (sprite.worker.inventory > 0) {
+            bucket.stored += sprite.worker.inventory;
+            sprite.worker.inventory = 0;
+            sprite.worker.state = 'IDLE';
+        }
+    });
 }
 
-function depositResource(player, bucket) {
-    if (player.inventory === 0) return;
-
-    bucket.stored += player.inventory;
-    player.inventory = 0;
-    target = null;
-}
-
-function update() {
-    if (!target) {
-        player.setVelocity(0);
-        return;
-    }
-
-    const tx = target.x ?? target.worldX;
-    const ty = target.y ?? target.worldY;
-
-    const distance = Phaser.Math.Distance.Between(player.x, player.y, tx, ty);
-    if (distance < 4) {
-        player.setVelocity(0);
-        player.anims.stop();
-        return;
-    }
-
-    const angle = Phaser.Math.Angle.Between(player.x, player.y, tx, ty);
-    const velocity = this.physics.velocityFromRotation(angle, speed);
-    player.setVelocity(velocity.x, velocity.y);
-
-    const deg = Phaser.Math.RadToDeg(angle);
-    const dirIndex = Phaser.Math.Wrap(Math.round((deg + 90) / 45), 0, 8);
-    const anims = ['up','upR','right','downR','down','downL','left','upL'];
-    player.anims.play(anims[dirIndex], true);
-
-    this.debugText.setText(
-        `Inventory: ${player.inventory}/20\n` +
-        `Resource Left: ${resourceNode.value}\n` +
-        `Bucket Stored: ${harvestBucket.stored}`
+function spawnRandomResource(scene) {
+    const t = Phaser.Utils.Array.GetRandom(RESOURCE_TYPES);
+    const sprite = scene.physics.add.staticSprite(
+        Phaser.Math.Between(50,750),
+        Phaser.Math.Between(50,550),
+        t.key
     );
+
+    const bar = scene.add.graphics();
+
+    const resource = {
+        sprite,
+        value: t.value,
+        max: t.value,
+        interval: t.interval,
+        timer: 0,
+        bar
+    };
+
+    sprite.resource = resource;
+    resources.push(resource);
+
+    workers.forEach(w => {
+        scene.physics.add.overlap(w.sprite, sprite, () => {
+            if (w.inventory < w.maxCarry && resource.value > 0) {
+                w.harvesting = resource;
+                w.state = 'HARVESTING';
+            }
+        });
+    });
+}
+
+function update(time, delta) {
+    workers.forEach(w => {
+        const s = w.sprite;
+
+        w.selection.setPosition(s.x, s.y).setVisible(selectedWorkers.includes(w));
+
+        if (w.state === 'MOVING' && w.target) {
+            const tx = w.target.x ?? w.target.sprite?.x;
+            const ty = w.target.y ?? w.target.sprite?.y;
+            const d = Phaser.Math.Distance.Between(s.x, s.y, tx, ty);
+            if (d > 6) {
+                const a = Phaser.Math.Angle.Between(s.x, s.y, tx, ty);
+                s.setVelocity(Math.cos(a)*100, Math.sin(a)*100);
+            } else {
+                s.setVelocity(0);
+            }
+        }
+
+        if (w.state === 'HARVESTING' && w.harvesting) {
+            const r = w.harvesting;
+            r.timer += delta;
+            drawBar(r);
+
+            if (r.timer >= r.interval) {
+                r.timer = 0;
+                const amt = Math.min(5, r.value, w.maxCarry - w.inventory);
+                r.value -= amt;
+                w.inventory += amt;
+
+                if (w.inventory >= w.maxCarry || r.value <= 0) {
+                    w.harvesting = null;
+                    w.setTarget(bucket);
+                }
+
+                if (r.value <= 0) destroyResource(r);
+            }
+        }
+    });
+}
+
+function drawBar(r) {
+    r.bar.clear();
+    const p = r.timer / r.interval;
+    r.bar.fillStyle(0x00ff00);
+    r.bar.fillRect(r.sprite.x - 20, r.sprite.y - 30, 40 * p, 5);
+}
+
+function destroyResource(r) {
+    r.bar.destroy();
+    r.sprite.destroy();
+    resources = resources.filter(x => x !== r);
+    spawnRandomResource(r.sprite.scene);
 }
 </script>
 
