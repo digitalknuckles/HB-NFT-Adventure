@@ -25,6 +25,7 @@
         color: #0f0;
         font-family: monospace;
         font-size: 14px;
+        white-space: pre-line;
     }
 </style>
 </head>
@@ -115,6 +116,7 @@ function create() {
 
     /* -------- INPUT -------- */
 
+    // LEFT CLICK SELECT / DRAG
     this.input.on('pointerdown', pointer => {
         if (pointer.rightButtonDown()) return;
         dragStart = { x: pointer.worldX, y: pointer.worldY };
@@ -153,11 +155,19 @@ function create() {
         dragStart = null;
     });
 
-    /* RIGHT CLICK COMMAND */
+    // RIGHT CLICK COMMAND (MOVE or HARVEST)
     this.input.on('pointerup', pointer => {
         if (!pointer.rightButtonReleased()) return;
 
-        issueFormationMove(pointer.worldX, pointer.worldY);
+        const objects = this.input.hitTestPointer(pointer);
+
+        // Harvest resource
+        if (objects.length && objects[0].resource) {
+            commandHarvest(objects[0].resource);
+        } else {
+            // Move formation
+            issueFormationMove(pointer.worldX, pointer.worldY);
+        }
     });
 
     /* -------- BUY BUTTON -------- */
@@ -199,14 +209,14 @@ function spawnBuilding(scene, x, y) {
 }
 
 function spawnWorker(scene, x, y) {
-    const sprite = scene.physics.add.sprite(x, y, 'character', 0)
-        .setInteractive();
+    const sprite = scene.physics.add.sprite(x, y, 'character', 0).setInteractive();
 
     sprite.worker = {
         sprite,
         path: [],
         inventory: 0,
         maxCarry: 20,
+        harvesting: null,
         harvestingType: null,
         lastResource: null,
         state: 'IDLE',
@@ -215,12 +225,12 @@ function spawnWorker(scene, x, y) {
 
     workers.push(sprite.worker);
     scene.physics.add.collider(sprite, buildings);
-
     scene.physics.add.overlap(sprite, bucket, () => {
         const w = sprite.worker;
         if (w.inventory > 0) {
             bucket.storage[w.harvestingType] += w.inventory;
             w.inventory = 0;
+            w.harvestingType = null;
             if (w.lastResource?.value > 0) moveWorkerTo(w, w.lastResource.sprite.x, w.lastResource.sprite.y);
         }
     });
@@ -235,13 +245,13 @@ function spawnRandomResource(scene) {
     );
 
     const bar = scene.add.graphics();
-    const resource = { sprite, ...t, max: t.value, timer: 0, bar };
+    const resource = { sprite, type: t.key, value: t.value, max: t.value, interval: t.interval, timer: 0, bar };
     sprite.resource = resource;
     resources.push(resource);
 }
 
 /* =========================
-   MOVEMENT
+   MOVEMENT & FORMATION
 ========================= */
 function issueFormationMove(x, y) {
     const cols = Math.ceil(Math.sqrt(selectedWorkers.length));
@@ -249,6 +259,8 @@ function issueFormationMove(x, y) {
         const ox = (i % cols) * 24;
         const oy = Math.floor(i / cols) * 24;
         moveWorkerTo(w, x + ox, y + oy);
+        w.state = 'MOVING';
+        w.harvesting = null;
     });
 }
 
@@ -265,26 +277,43 @@ function moveWorkerTo(worker, x, y) {
 }
 
 /* =========================
-   UPDATE
+   HARVEST COMMAND
+========================= */
+function commandHarvest(resource) {
+    selectedWorkers.forEach(w => {
+        w.harvesting = resource;
+        w.harvestingType = resource.type;
+        w.lastResource = resource;
+        moveWorkerTo(w, resource.sprite.x, resource.sprite.y);
+        w.state = 'MOVING';
+    });
+}
+
+/* =========================
+   UPDATE LOOP
 ========================= */
 function update(time, delta) {
     easystar.calculate();
 
+    // Update UI
     uiDiv.innerText =
         `TREE: ${bucket.storage.tree}\n` +
         `ROCK: ${bucket.storage.rock}\n` +
         `CRYSTAL: ${bucket.storage.crystal}`;
 
+    // Buy button cooldown
+    if (buyBtn.cooldown > 0) buyBtn.cooldown -= delta;
+
     workers.forEach(w => {
         const s = w.sprite;
         w.selection.setPosition(s.x, s.y).setVisible(selectedWorkers.includes(w));
 
+        // MOVE ALONG PATH
         if (w.path.length > 0) {
             const node = w.path[0];
-            const tx = node.x * TILE_SIZE + TILE_SIZE / 2;
-            const ty = node.y * TILE_SIZE + TILE_SIZE / 2;
+            const tx = node.x * TILE_SIZE + TILE_SIZE/2;
+            const ty = node.y * TILE_SIZE + TILE_SIZE/2;
             const d = Phaser.Math.Distance.Between(s.x, s.y, tx, ty);
-
             if (d < 4) w.path.shift();
             else {
                 const a = Phaser.Math.Angle.Between(s.x, s.y, tx, ty);
@@ -292,10 +321,49 @@ function update(time, delta) {
             }
         } else {
             s.setVelocity(0);
+
+            // START HARVESTING IF AT RESOURCE
+            if (w.harvesting && w.state !== 'HARVESTING') {
+                const r = w.harvesting;
+                if (r.value > 0 && Phaser.Math.Distance.Between(s.x, s.y, r.sprite.x, r.sprite.y) < 20) {
+                    w.state = 'HARVESTING';
+                    r.timer = 0;
+                }
+            }
+        }
+
+        // HARVEST LOGIC
+        if (w.state === 'HARVESTING' && w.harvesting) {
+            const r = w.harvesting;
+            r.timer += delta;
+
+            // draw bar
+            r.bar.clear();
+            const p = r.timer / r.interval;
+            r.bar.fillStyle(0x00ff00);
+            r.bar.fillRect(r.sprite.x-20, r.sprite.y-30, 40*p, 5);
+
+            if (r.timer >= r.interval) {
+                r.timer = 0;
+                const amt = Math.min(5, r.value, w.maxCarry - w.inventory);
+                r.value -= amt;
+                w.inventory += amt;
+                r.sprite.setScale(r.value/r.max);
+
+                if (w.inventory >= w.maxCarry || r.value <= 0) {
+                    w.state = 'MOVING';
+                    moveWorkerTo(w, bucket.x, bucket.y);
+                }
+
+                if (r.value <= 0) {
+                    r.bar.destroy();
+                    r.sprite.destroy();
+                    resources = resources.filter(x=>x!==r);
+                    spawnRandomResource(w.sprite.scene);
+                }
+            }
         }
     });
-
-    if (buyBtn.cooldown > 0) buyBtn.cooldown -= delta;
 }
 
 /* =========================
