@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>8-Direction Click-to-Move Game</title>
+    <title>Harvesting Click-to-Move Game</title>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.85.2/dist/phaser.min.js"></script>
     <style>
         body { margin: 0; }
@@ -19,23 +19,20 @@ const config = {
     backgroundColor: '#000000',
     physics: {
         default: 'arcade',
-        arcade: {
-            debug: false
-        }
+        arcade: { debug: false }
     },
-    scene: {
-        preload,
-        create,
-        update
-    }
+    scene: { preload, create, update }
 };
 
 const game = new Phaser.Game(config);
 
 let player, target = null, speed = 100;
+let resourceNode, harvestBucket;
 
 function preload() {
     this.load.image('background', 'assets/background1.png');
+    this.load.image('resource', 'assets/resource.png');     // placeholder image
+    this.load.image('bucket', 'assets/bucket.png');         // placeholder image
     this.load.spritesheet('character', 'assets/character.png', {
         frameWidth: 32,
         frameHeight: 32
@@ -43,82 +40,106 @@ function preload() {
 }
 
 function create() {
+    this.add.image(400, 300, 'background').setOrigin(0.5);
 
+    // Debug UI
     this.debugText = this.add.text(10, 10, '', {
-    font: '16px Courier',
-    fill: '#00ff00',
-    backgroundColor: '#000000',
-    padding: { x: 4, y: 2 }
-});
-this.debugText.setScrollFactor(0); // keep it fixed on screen
+        font: '16px Courier',
+        fill: '#00ff00',
+        backgroundColor: '#000000',
+        padding: { x: 4, y: 2 }
+    }).setScrollFactor(0);
 
-    this.debugArrow = this.add.graphics({ lineStyle: { width: 2, color: 0xff0000 } });
-    this.add.image(400, 300, 'background').setOrigin(0.5, 0.5);
-
+    // Player
     player = this.physics.add.sprite(400, 300, 'character', 0);
     player.setCollideWorldBounds(true);
-    player.setDepth(1); // Ensure player is above background
+    player.inventory = 0;
+    player.maxCarry = 20;
 
-const directions = ['up', 'upR', 'right', 'downR', 'down', 'downL', 'left', 'upL'];
-for (let i = 0; i < directions.length; i++) {
-    this.anims.create({
-        key: directions[i],
-        frames: this.anims.generateFrameNumbers('character', { start: i * 8, end: i * 8 + 7 }),
-        frameRate: 8,
-        repeat: -1
+    // Resource Node
+    resourceNode = this.physics.add.staticSprite(200, 200, 'resource');
+    resourceNode.value = 300;
+
+    // Harvest Bucket
+    harvestBucket = this.physics.add.staticSprite(600, 400, 'bucket');
+    harvestBucket.stored = 0;
+
+    // Animations
+    const directions = ['up','upR','right','downR','down','downL','left','upL'];
+    for (let i = 0; i < directions.length; i++) {
+        this.anims.create({
+            key: directions[i],
+            frames: this.anims.generateFrameNumbers('character', {
+                start: i * 8,
+                end: i * 8 + 7
+            }),
+            frameRate: 8,
+            repeat: -1
+        });
+    }
+
+    // Collisions
+    this.physics.add.overlap(player, resourceNode, harvestResource, null, this);
+    this.physics.add.overlap(player, harvestBucket, depositResource, null, this);
+
+    // Click handling
+    this.input.on('pointerdown', (pointer, objects) => {
+        if (objects.length > 0) {
+            target = objects[0]; // resource or bucket
+        } else {
+            target = { x: pointer.worldX, y: pointer.worldY };
+        }
     });
 }
 
-    this.input.on('pointerdown', (pointer) => {
-        target = { x: pointer.worldX, y: pointer.worldY };
-    });
+function harvestResource(player, resource) {
+    if (player.inventory >= player.maxCarry || resource.value <= 0) return;
+
+    const amount = Math.min(20, resource.value);
+    player.inventory += amount;
+    resource.value -= amount;
+
+    target = harvestBucket;
+}
+
+function depositResource(player, bucket) {
+    if (player.inventory === 0) return;
+
+    bucket.stored += player.inventory;
+    player.inventory = 0;
+    target = null;
 }
 
 function update() {
-    if (!target) return;
-
-    const distX = target.x - player.x;
-    const distY = target.y - player.y;
-    const distance = Phaser.Math.Distance.Between(player.x, player.y, target.x, target.y);
-
-    if (distance < 2) {
+    if (!target) {
         player.setVelocity(0);
-        player.anims.stop();
-        if (player.anims.currentAnim) {
-            const lastFrame = player.anims.currentAnim.frames[7];
-            player.setFrame(lastFrame.frame.name);
-        }
-        target = null;
         return;
     }
 
-    const angle = Phaser.Math.Angle.Between(player.x, player.y, target.x, target.y);
+    const tx = target.x ?? target.worldX;
+    const ty = target.y ?? target.worldY;
+
+    const distance = Phaser.Math.Distance.Between(player.x, player.y, tx, ty);
+    if (distance < 4) {
+        player.setVelocity(0);
+        player.anims.stop();
+        return;
+    }
+
+    const angle = Phaser.Math.Angle.Between(player.x, player.y, tx, ty);
     const velocity = this.physics.velocityFromRotation(angle, speed);
     player.setVelocity(velocity.x, velocity.y);
 
-    // Correct mapping for your sprite sheet
     const deg = Phaser.Math.RadToDeg(angle);
-    const directionNames = ['up', 'upR', 'right', 'downR', 'down', 'downL', 'left', 'upL'];
     const dirIndex = Phaser.Math.Wrap(Math.round((deg + 90) / 45), 0, 8);
-    const anim = directionNames[dirIndex];
-    this.debugText.setText(`Direction: ${anim}`);
+    const anims = ['up','upR','right','downR','down','downL','left','upL'];
+    player.anims.play(anims[dirIndex], true);
 
-    if (!player.anims.isPlaying || player.anims.currentAnim.key !== anim) {
-        player.anims.play(anim, true);
-
-            this.debugArrow.clear();
-
-const arrowLength = 40;
-const endX = player.x + Math.cos(angle) * arrowLength;
-const endY = player.y + Math.sin(angle) * arrowLength;
-
-// Draw line from player to target direction
-this.debugArrow.lineStyle(2, 0xff0000);
-this.debugArrow.beginPath();
-this.debugArrow.moveTo(player.x, player.y);
-this.debugArrow.lineTo(endX, endY);
-this.debugArrow.strokePath();
-    }
+    this.debugText.setText(
+        `Inventory: ${player.inventory}/20\n` +
+        `Resource Left: ${resourceNode.value}\n` +
+        `Bucket Stored: ${harvestBucket.stored}`
+    );
 }
 </script>
 
