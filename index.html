@@ -5,48 +5,41 @@
 <title>RTS Worker Economy Prototype</title>
 
 <script src="https://cdn.jsdelivr.net/npm/phaser@3.85.2/dist/phaser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/easystarjs@0.4.4/bin/easystar-0.4.4.min.js"></script>
 
 <style>
     body {
         margin: 0;
         background: #111;
+        user-select: none;
     }
     canvas {
         display: block;
         margin: auto;
         border: 1px solid #333;
     }
+    #ui {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        color: #0f0;
+        font-family: monospace;
+        font-size: 14px;
+    }
 </style>
 </head>
 
-<body>
+<body oncontextmenu="return false;">
+<div id="ui"></div>
 
 <script>
-const config = {
-    type: Phaser.AUTO,
-    width: 800,
-    height: 600,
-    physics: {
-        default: 'arcade',
-        arcade: { debug: false }
-    },
-    scene: { preload, create, update }
-};
+/* =========================
+   CONFIG
+========================= */
+const TILE_SIZE = 32;
+const GRID_W = 25;
+const GRID_H = 19;
 
-new Phaser.Game(config);
-
-let workers = [];
-let resources = [];
-let buildings = [];
-let selectedWorkers = [];
-let bucket;
-
-// Drag select
-let dragStart = null;
-let selectionGraphics;
-
-// Worker purchase
-let buyBtn, buyText;
 const WORKER_COST = 100;
 const WORKER_COOLDOWN = 5000;
 
@@ -56,7 +49,39 @@ const RESOURCE_TYPES = [
     { key: 'crystal', value: 800, interval: 1400 }
 ];
 
+const config = {
+    type: Phaser.AUTO,
+    width: 800,
+    height: 600,
+    physics: { default: 'arcade', arcade: { debug: false }},
+    scene: { preload, create, update }
+};
+
+new Phaser.Game(config);
+
+/* =========================
+   GLOBAL STATE
+========================= */
+let workers = [];
+let resources = [];
+let buildings = [];
+let selectedWorkers = [];
+let bucket;
+
+let dragStart = null;
+let selectionGraphics;
+
+let buyBtn, buyText;
+let uiDiv = document.getElementById('ui');
+
+let grid = [];
+let easystar;
+
+/* =========================
+   PRELOAD
+========================= */
 function preload() {
+    this.load.image('background', 'assets/background1.png');
     this.load.image('tree', 'assets/resource.png');
     this.load.image('rock', 'assets/rock.png');
     this.load.image('crystal', 'assets/crystal.png');
@@ -66,7 +91,14 @@ function preload() {
     this.load.spritesheet('character','assets/character.png',{ frameWidth:32, frameHeight:32 });
 }
 
+/* =========================
+   CREATE
+========================= */
 function create() {
+    this.add.image(400, 300, 'background').setDepth(-10);
+
+    buildGrid();
+    setupPathfinding();
 
     bucket = this.physics.add.staticSprite(400, 300, 'bucket');
     bucket.storage = { tree: 0, rock: 0, crystal: 0 };
@@ -79,10 +111,12 @@ function create() {
     spawnRandomResource(this);
     spawnRandomResource(this);
 
-    selectionGraphics = this.add.graphics();
+    selectionGraphics = this.add.graphics().setDepth(1000);
 
-    // Drag select
+    /* -------- INPUT -------- */
+
     this.input.on('pointerdown', pointer => {
+        if (pointer.rightButtonDown()) return;
         dragStart = { x: pointer.worldX, y: pointer.worldY };
         selectedWorkers = [];
     });
@@ -100,7 +134,7 @@ function create() {
     });
 
     this.input.on('pointerup', pointer => {
-        if (!dragStart) return;
+        if (!dragStart || pointer.rightButtonDown()) return;
 
         const rect = new Phaser.Geom.Rectangle(
             Math.min(dragStart.x, pointer.worldX),
@@ -119,16 +153,14 @@ function create() {
         dragStart = null;
     });
 
-    // Command issuing
-    this.input.on('pointerdown', (pointer, objects) => {
-        if (objects[0]?.resource) {
-            selectedWorkers.forEach(w => w.setTarget(objects[0].resource));
-        } else if (objects[0] === bucket) {
-            selectedWorkers.forEach(w => w.setTarget(bucket));
-        }
+    /* RIGHT CLICK COMMAND */
+    this.input.on('pointerup', pointer => {
+        if (!pointer.rightButtonReleased()) return;
+
+        issueFormationMove(pointer.worldX, pointer.worldY);
     });
 
-    // Buy worker button
+    /* -------- BUY BUTTON -------- */
     buyBtn = this.add.rectangle(700, 50, 90, 30, 0x4444ff).setInteractive();
     buyText = this.add.text(655, 42, 'Buy Worker', { font: '14px Arial', fill: '#fff' });
     buyBtn.cooldown = 0;
@@ -143,34 +175,45 @@ function create() {
     });
 }
 
+/* =========================
+   GRID & PATHFINDING
+========================= */
+function buildGrid() {
+    grid = Array(GRID_H).fill().map(() => Array(GRID_W).fill(0));
+}
+
+function setupPathfinding() {
+    easystar = new EasyStar.js();
+    easystar.setGrid(grid);
+    easystar.setAcceptableTiles([0]);
+    easystar.enableDiagonals();
+}
+
+/* =========================
+   SPAWNERS
+========================= */
 function spawnBuilding(scene, x, y) {
     const b = scene.physics.add.staticSprite(x, y, 'building');
     buildings.push(b);
+    markGridBlocked(x, y);
 }
 
 function spawnWorker(scene, x, y) {
-    const sprite = scene.physics.add.sprite(x, y, 'character', 0);
+    const sprite = scene.physics.add.sprite(x, y, 'character', 0)
+        .setInteractive();
 
     sprite.worker = {
         sprite,
+        path: [],
         inventory: 0,
         maxCarry: 20,
         harvestingType: null,
         lastResource: null,
         state: 'IDLE',
-        target: null,
-        harvesting: null,
-        timer: 0,
-        selection: scene.add.image(x, y, 'select').setVisible(false),
-
-        setTarget(target) {
-            this.target = target;
-            this.state = 'MOVING';
-        }
+        selection: scene.add.image(x, y, 'select').setVisible(false)
     };
 
     workers.push(sprite.worker);
-
     scene.physics.add.collider(sprite, buildings);
 
     scene.physics.add.overlap(sprite, bucket, () => {
@@ -178,18 +221,8 @@ function spawnWorker(scene, x, y) {
         if (w.inventory > 0) {
             bucket.storage[w.harvestingType] += w.inventory;
             w.inventory = 0;
-            w.harvestingType = null;
-
-            if (w.lastResource && w.lastResource.value > 0) {
-                w.setTarget(w.lastResource);
-            } else {
-                w.state = 'IDLE';
-            }
+            if (w.lastResource?.value > 0) moveWorkerTo(w, w.lastResource.sprite.x, w.lastResource.sprite.y);
         }
-    });
-
-    resources.forEach(r => {
-        scene.physics.add.overlap(sprite, r.sprite, () => startHarvest(sprite.worker, r));
     });
 }
 
@@ -202,97 +235,77 @@ function spawnRandomResource(scene) {
     );
 
     const bar = scene.add.graphics();
-
-    const resource = {
-        sprite,
-        type: t.key,
-        value: t.value,
-        max: t.value,
-        interval: t.interval,
-        timer: 0,
-        bar
-    };
-
+    const resource = { sprite, ...t, max: t.value, timer: 0, bar };
     sprite.resource = resource;
     resources.push(resource);
+}
 
-    workers.forEach(w => {
-        scene.physics.add.overlap(w.sprite, sprite, () => startHarvest(w, resource));
+/* =========================
+   MOVEMENT
+========================= */
+function issueFormationMove(x, y) {
+    const cols = Math.ceil(Math.sqrt(selectedWorkers.length));
+    selectedWorkers.forEach((w, i) => {
+        const ox = (i % cols) * 24;
+        const oy = Math.floor(i / cols) * 24;
+        moveWorkerTo(w, x + ox, y + oy);
     });
 }
 
-function startHarvest(worker, resource) {
-    if (worker.inventory >= worker.maxCarry || resource.value <= 0) return;
-    worker.harvesting = resource;
-    worker.harvestingType = resource.type;
-    worker.lastResource = resource;
-    worker.state = 'HARVESTING';
+function moveWorkerTo(worker, x, y) {
+    const sx = Math.floor(worker.sprite.x / TILE_SIZE);
+    const sy = Math.floor(worker.sprite.y / TILE_SIZE);
+    const ex = Math.floor(x / TILE_SIZE);
+    const ey = Math.floor(y / TILE_SIZE);
+
+    easystar.findPath(sx, sy, ex, ey, path => {
+        if (path) worker.path = path;
+    });
+    easystar.calculate();
 }
 
+/* =========================
+   UPDATE
+========================= */
 function update(time, delta) {
+    easystar.calculate();
 
-    if (buyBtn.cooldown > 0) {
-        buyBtn.cooldown -= delta;
-        buyBtn.setFillStyle(0x222222);
-    } else {
-        buyBtn.setFillStyle(0x4444ff);
-    }
+    uiDiv.innerText =
+        `TREE: ${bucket.storage.tree}\n` +
+        `ROCK: ${bucket.storage.rock}\n` +
+        `CRYSTAL: ${bucket.storage.crystal}`;
 
     workers.forEach(w => {
         const s = w.sprite;
         w.selection.setPosition(s.x, s.y).setVisible(selectedWorkers.includes(w));
 
-        if (w.state === 'MOVING' && w.target) {
-            const tx = w.target.x ?? w.target.sprite?.x;
-            const ty = w.target.y ?? w.target.sprite?.y;
-            const dist = Phaser.Math.Distance.Between(s.x, s.y, tx, ty);
+        if (w.path.length > 0) {
+            const node = w.path[0];
+            const tx = node.x * TILE_SIZE + TILE_SIZE / 2;
+            const ty = node.y * TILE_SIZE + TILE_SIZE / 2;
+            const d = Phaser.Math.Distance.Between(s.x, s.y, tx, ty);
 
-            if (dist > 6) {
-                const angle = Phaser.Math.Angle.Between(s.x, s.y, tx, ty);
-                s.setVelocity(Math.cos(angle)*100, Math.sin(angle)*100);
-            } else {
-                s.setVelocity(0);
+            if (d < 4) w.path.shift();
+            else {
+                const a = Phaser.Math.Angle.Between(s.x, s.y, tx, ty);
+                s.setVelocity(Math.cos(a)*100, Math.sin(a)*100);
             }
-        }
-
-        if (w.state === 'HARVESTING' && w.harvesting) {
-            const r = w.harvesting;
-            r.timer += delta;
-            drawBar(r);
-
-            if (r.timer >= r.interval) {
-                r.timer = 0;
-                const amt = Math.min(5, r.value, w.maxCarry - w.inventory);
-                r.value -= amt;
-                w.inventory += amt;
-
-                r.sprite.setScale(r.value / r.max);
-
-                if (w.inventory >= w.maxCarry || r.value <= 0) {
-                    w.harvesting = null;
-                    w.setTarget(bucket);
-                }
-
-                if (r.value <= 0) destroyResource(r);
-            }
+        } else {
+            s.setVelocity(0);
         }
     });
+
+    if (buyBtn.cooldown > 0) buyBtn.cooldown -= delta;
 }
 
-function drawBar(r) {
-    r.bar.clear();
-    const p = r.timer / r.interval;
-    r.bar.fillStyle(0x00ff00);
-    r.bar.fillRect(r.sprite.x - 20, r.sprite.y - 30, 40 * p, 5);
-}
-
-function destroyResource(r) {
-    r.bar.destroy();
-    r.sprite.destroy();
-    resources = resources.filter(x => x !== r);
-    spawnRandomResource(r.sprite.scene);
+/* =========================
+   GRID HELPERS
+========================= */
+function markGridBlocked(x, y) {
+    const gx = Math.floor(x / TILE_SIZE);
+    const gy = Math.floor(y / TILE_SIZE);
+    if (grid[gy] && grid[gy][gx] !== undefined) grid[gy][gx] = 1;
 }
 </script>
-
 </body>
 </html>
