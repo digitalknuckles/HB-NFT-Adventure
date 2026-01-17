@@ -1,14 +1,24 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>Harvesting Click-to-Move Game</title>
-    <script src="https://cdn.jsdelivr.net/npm/phaser@3.85.2/dist/phaser.min.js"></script>
-    <style>
-        body { margin: 0; }
-        canvas { display: block; margin: auto; }
-    </style>
+<meta charset="UTF-8">
+<title>RTS Worker Economy Prototype</title>
+
+<script src="https://cdn.jsdelivr.net/npm/phaser@3.85.2/dist/phaser.min.js"></script>
+
+<style>
+    body {
+        margin: 0;
+        background: #111;
+    }
+    canvas {
+        display: block;
+        margin: auto;
+        border: 1px solid #333;
+    }
+</style>
 </head>
+
 <body>
 
 <script>
@@ -16,7 +26,10 @@ const config = {
     type: Phaser.AUTO,
     width: 800,
     height: 600,
-    physics: { default: 'arcade', arcade: { debug: false }},
+    physics: {
+        default: 'arcade',
+        arcade: { debug: false }
+    },
     scene: { preload, create, update }
 };
 
@@ -24,8 +37,18 @@ new Phaser.Game(config);
 
 let workers = [];
 let resources = [];
+let buildings = [];
 let selectedWorkers = [];
 let bucket;
+
+// Drag select
+let dragStart = null;
+let selectionGraphics;
+
+// Worker purchase
+let buyBtn, buyText;
+const WORKER_COST = 100;
+const WORKER_COOLDOWN = 5000;
 
 const RESOURCE_TYPES = [
     { key: 'tree', value: 300, interval: 500 },
@@ -38,46 +61,102 @@ function preload() {
     this.load.image('rock', 'assets/rock.png');
     this.load.image('crystal', 'assets/crystal.png');
     this.load.image('bucket', 'assets/bucket.png');
+    this.load.image('building', 'assets/building.png');
     this.load.image('select', 'assets/select.png');
     this.load.spritesheet('character','assets/character.png',{ frameWidth:32, frameHeight:32 });
 }
 
 function create() {
+
     bucket = this.physics.add.staticSprite(400, 300, 'bucket');
-    bucket.stored = 0;
+    bucket.storage = { tree: 0, rock: 0, crystal: 0 };
 
-    spawnWorker(this, 360, 320);
-    spawnWorker(this, 440, 320);
+    spawnBuilding(this, 400, 150);
+    spawnWorker(this, 360, 340);
+    spawnWorker(this, 440, 340);
 
     spawnRandomResource(this);
     spawnRandomResource(this);
     spawnRandomResource(this);
 
-    this.input.on('pointerdown', (pointer, objects) => {
-        if (!pointer.event.shiftKey) selectedWorkers = [];
+    selectionGraphics = this.add.graphics();
 
-        objects.forEach(obj => {
-            if (obj.worker) {
-                selectedWorkers.push(obj.worker);
+    // Drag select
+    this.input.on('pointerdown', pointer => {
+        dragStart = { x: pointer.worldX, y: pointer.worldY };
+        selectedWorkers = [];
+    });
+
+    this.input.on('pointermove', pointer => {
+        if (!dragStart) return;
+        selectionGraphics.clear();
+        selectionGraphics.lineStyle(1, 0x00ff00);
+        selectionGraphics.strokeRect(
+            dragStart.x,
+            dragStart.y,
+            pointer.worldX - dragStart.x,
+            pointer.worldY - dragStart.y
+        );
+    });
+
+    this.input.on('pointerup', pointer => {
+        if (!dragStart) return;
+
+        const rect = new Phaser.Geom.Rectangle(
+            Math.min(dragStart.x, pointer.worldX),
+            Math.min(dragStart.y, pointer.worldY),
+            Math.abs(pointer.worldX - dragStart.x),
+            Math.abs(pointer.worldY - dragStart.y)
+        );
+
+        workers.forEach(w => {
+            if (Phaser.Geom.Rectangle.Contains(rect, w.sprite.x, w.sprite.y)) {
+                selectedWorkers.push(w);
             }
         });
 
+        selectionGraphics.clear();
+        dragStart = null;
+    });
+
+    // Command issuing
+    this.input.on('pointerdown', (pointer, objects) => {
         if (objects[0]?.resource) {
             selectedWorkers.forEach(w => w.setTarget(objects[0].resource));
         } else if (objects[0] === bucket) {
             selectedWorkers.forEach(w => w.setTarget(bucket));
-        } else {
-            selectedWorkers.forEach(w => w.moveTo(pointer.worldX, pointer.worldY));
         }
     });
+
+    // Buy worker button
+    buyBtn = this.add.rectangle(700, 50, 90, 30, 0x4444ff).setInteractive();
+    buyText = this.add.text(655, 42, 'Buy Worker', { font: '14px Arial', fill: '#fff' });
+    buyBtn.cooldown = 0;
+
+    buyBtn.on('pointerdown', () => {
+        if (buyBtn.cooldown > 0) return;
+        if (bucket.storage.crystal < WORKER_COST) return;
+
+        bucket.storage.crystal -= WORKER_COST;
+        spawnWorker(this, buyBtn.x - 50, buyBtn.y + 60);
+        buyBtn.cooldown = WORKER_COOLDOWN;
+    });
+}
+
+function spawnBuilding(scene, x, y) {
+    const b = scene.physics.add.staticSprite(x, y, 'building');
+    buildings.push(b);
 }
 
 function spawnWorker(scene, x, y) {
     const sprite = scene.physics.add.sprite(x, y, 'character', 0);
+
     sprite.worker = {
         sprite,
         inventory: 0,
         maxCarry: 20,
+        harvestingType: null,
+        lastResource: null,
         state: 'IDLE',
         target: null,
         harvesting: null,
@@ -87,29 +166,38 @@ function spawnWorker(scene, x, y) {
         setTarget(target) {
             this.target = target;
             this.state = 'MOVING';
-        },
-        moveTo(x, y) {
-            this.target = { x, y };
-            this.state = 'MOVING';
         }
     };
 
     workers.push(sprite.worker);
 
+    scene.physics.add.collider(sprite, buildings);
+
     scene.physics.add.overlap(sprite, bucket, () => {
-        if (sprite.worker.inventory > 0) {
-            bucket.stored += sprite.worker.inventory;
-            sprite.worker.inventory = 0;
-            sprite.worker.state = 'IDLE';
+        const w = sprite.worker;
+        if (w.inventory > 0) {
+            bucket.storage[w.harvestingType] += w.inventory;
+            w.inventory = 0;
+            w.harvestingType = null;
+
+            if (w.lastResource && w.lastResource.value > 0) {
+                w.setTarget(w.lastResource);
+            } else {
+                w.state = 'IDLE';
+            }
         }
+    });
+
+    resources.forEach(r => {
+        scene.physics.add.overlap(sprite, r.sprite, () => startHarvest(sprite.worker, r));
     });
 }
 
 function spawnRandomResource(scene) {
     const t = Phaser.Utils.Array.GetRandom(RESOURCE_TYPES);
     const sprite = scene.physics.add.staticSprite(
-        Phaser.Math.Between(50,750),
-        Phaser.Math.Between(50,550),
+        Phaser.Math.Between(80,720),
+        Phaser.Math.Between(120,520),
         t.key
     );
 
@@ -117,6 +205,7 @@ function spawnRandomResource(scene) {
 
     const resource = {
         sprite,
+        type: t.key,
         value: t.value,
         max: t.value,
         interval: t.interval,
@@ -128,28 +217,39 @@ function spawnRandomResource(scene) {
     resources.push(resource);
 
     workers.forEach(w => {
-        scene.physics.add.overlap(w.sprite, sprite, () => {
-            if (w.inventory < w.maxCarry && resource.value > 0) {
-                w.harvesting = resource;
-                w.state = 'HARVESTING';
-            }
-        });
+        scene.physics.add.overlap(w.sprite, sprite, () => startHarvest(w, resource));
     });
 }
 
+function startHarvest(worker, resource) {
+    if (worker.inventory >= worker.maxCarry || resource.value <= 0) return;
+    worker.harvesting = resource;
+    worker.harvestingType = resource.type;
+    worker.lastResource = resource;
+    worker.state = 'HARVESTING';
+}
+
 function update(time, delta) {
+
+    if (buyBtn.cooldown > 0) {
+        buyBtn.cooldown -= delta;
+        buyBtn.setFillStyle(0x222222);
+    } else {
+        buyBtn.setFillStyle(0x4444ff);
+    }
+
     workers.forEach(w => {
         const s = w.sprite;
-
         w.selection.setPosition(s.x, s.y).setVisible(selectedWorkers.includes(w));
 
         if (w.state === 'MOVING' && w.target) {
             const tx = w.target.x ?? w.target.sprite?.x;
             const ty = w.target.y ?? w.target.sprite?.y;
-            const d = Phaser.Math.Distance.Between(s.x, s.y, tx, ty);
-            if (d > 6) {
-                const a = Phaser.Math.Angle.Between(s.x, s.y, tx, ty);
-                s.setVelocity(Math.cos(a)*100, Math.sin(a)*100);
+            const dist = Phaser.Math.Distance.Between(s.x, s.y, tx, ty);
+
+            if (dist > 6) {
+                const angle = Phaser.Math.Angle.Between(s.x, s.y, tx, ty);
+                s.setVelocity(Math.cos(angle)*100, Math.sin(angle)*100);
             } else {
                 s.setVelocity(0);
             }
@@ -165,6 +265,8 @@ function update(time, delta) {
                 const amt = Math.min(5, r.value, w.maxCarry - w.inventory);
                 r.value -= amt;
                 w.inventory += amt;
+
+                r.sprite.setScale(r.value / r.max);
 
                 if (w.inventory >= w.maxCarry || r.value <= 0) {
                     w.harvesting = null;
