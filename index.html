@@ -172,6 +172,55 @@ function spawnWorker(scene, x, y) {
     });
 }
 
+   /* ---- BUY WORKER ---- */
+    buyBtn = this.add.rectangle(700, 50, 90, 30, 0x4444ff).setInteractive();
+    buyText = this.add.text(655, 42, 'Buy Worker', { font: '14px Arial', fill: '#fff' });
+    buyBtn.cooldown = 0;
+
+    buyBtn.on('pointerdown', () => {
+        if (buyBtn.cooldown > 0) return;
+        if (bucket.storage.crystal < WORKER_COST) return;
+
+        bucket.storage.crystal -= WORKER_COST;
+        spawnWorker(this, buyBtn.x - 40, buyBtn.y + 60);
+        buyBtn.cooldown = WORKER_COOLDOWN;
+    });
+}
+
+/* =========================
+   SPAWNERS
+========================= */
+function spawnWorker(scene, x, y) {
+    const sprite = scene.physics.add.sprite(x, y, 'character', 0);
+    sprite.play('worker-idle');
+
+    const worker = {
+        sprite,
+        state: 'IDLE',
+        inventory: 0,
+        maxCarry: 20,
+        harvestingType: null,
+        targetResource: null,
+        moveTarget: null,
+        harvestTimer: 0
+    };
+
+    workers.push(worker);
+
+    scene.physics.add.overlap(sprite, bucket, () => {
+        if (worker.inventory > 0) {
+            bucket.storage[worker.harvestingType] += worker.inventory;
+            worker.inventory = 0;
+
+            if (worker.targetResource && worker.targetResource.value > 0) {
+                worker.state = 'MOVE_TO_RESOURCE';
+            } else {
+                worker.state = 'IDLE';
+            }
+        }
+    });
+}
+    
 /* =========================
    RESOURCES
 ========================= */
