@@ -38,7 +38,7 @@
 ========================= */
 const MOVE_SPEED = 90;
 const WORKER_COST = 100;
-const WORKER_COOLDOWN = 4000;
+const WORKER_COOLDOWN = 5000;
 
 const RESOURCE_TYPES = [
     { key: 'tree', value: 300, interval: 600 },
@@ -63,9 +63,12 @@ let workers = [];
 let resources = [];
 let selectedWorkers = [];
 let bucket;
-let uiDiv = document.getElementById('ui');
+
+let dragStart = null;
+let selectionGraphics;
 
 let buyBtn, buyText;
+let uiDiv = document.getElementById('ui');
 
 /* =========================
    PRELOAD
@@ -93,7 +96,7 @@ function create() {
     for (let i = 0; i < directions.length; i++) {
         this.anims.create({
             key: directions[i],
-            frames: this.anims.generateFrameNumbers('character', {
+            frames: this.anims.generateFrameNumbers('character',{
                 start: i * 8,
                 end: i * 8 + 7
             }),
@@ -103,7 +106,7 @@ function create() {
     }
 
     bucket = this.physics.add.staticSprite(400, 300, 'bucket');
-    bucket.storage = { tree: 0, rock: 0, crystal: 0 };
+    bucket.storage = { tree:0, rock:0, crystal:0 };
 
     spawnWorker(this, 360, 340);
     spawnWorker(this, 440, 340);
@@ -112,81 +115,106 @@ function create() {
     spawnRandomResource(this);
     spawnRandomResource(this);
 
-    /* ---- BUY WORKER BUTTON ---- */
-    buyBtn = this.add.rectangle(700, 50, 90, 30, 0x4444ff).setInteractive();
-    buyText = this.add.text(655, 42, 'Buy Worker', {
-        font: '14px Arial',
-        fill: '#fff'
-    });
+    /* ---- DRAG SELECTION ---- */
+    selectionGraphics = this.add.graphics();
 
-    buyBtn.cooldown = 0;
-
-    buyBtn.on('pointerdown', () => {
-        if (buyBtn.cooldown > 0) return;
-        if (bucket.storage.crystal < WORKER_COST) return;
-
-        bucket.storage.crystal -= WORKER_COST;
-        spawnWorker(this, 700, 100);
-        buyBtn.cooldown = WORKER_COOLDOWN;
-    });
-
-    /* ---- INPUT ---- */
     this.input.on('pointerdown', p => {
         if (p.rightButtonDown()) return;
-        selectedWorkers = workers.filter(w =>
-            Phaser.Math.Distance.Between(w.sprite.x, w.sprite.y, p.worldX, p.worldY) < 32
+        dragStart = { x:p.worldX, y:p.worldY };
+        selectedWorkers = [];
+    });
+
+    this.input.on('pointermove', p => {
+        if (!dragStart) return;
+        selectionGraphics.clear();
+        selectionGraphics.lineStyle(1,0x00ff00);
+        selectionGraphics.strokeRect(
+            dragStart.x,
+            dragStart.y,
+            p.worldX - dragStart.x,
+            p.worldY - dragStart.y
         );
     });
 
     this.input.on('pointerup', p => {
+        if (p.rightButtonDown() || !dragStart) return;
+
+        const rect = new Phaser.Geom.Rectangle(
+            Math.min(dragStart.x,p.worldX),
+            Math.min(dragStart.y,p.worldY),
+            Math.abs(p.worldX-dragStart.x),
+            Math.abs(p.worldY-dragStart.y)
+        );
+
+        workers.forEach(w=>{
+            if (Phaser.Geom.Rectangle.Contains(rect,w.sprite.x,w.sprite.y))
+                selectedWorkers.push(w);
+        });
+
+        dragStart=null;
+        selectionGraphics.clear();
+    });
+
+    /* ---- COMMAND (RIGHT CLICK) ---- */
+    this.input.on('pointerup', p=>{
         if (!p.rightButtonReleased()) return;
 
-        selectedWorkers.forEach(w => {
+        selectedWorkers.forEach(w=>{
             const res = resources.find(r =>
-                Phaser.Geom.Rectangle.Contains(r.sprite.getBounds(), p.worldX, p.worldY)
+                Phaser.Geom.Rectangle.Contains(r.sprite.getBounds(),p.worldX,p.worldY)
             );
-
             if (res) {
                 w.targetResource = res;
                 w.state = 'MOVE_TO_RESOURCE';
             } else {
-                w.moveTarget = { x:p.worldX, y:p.worldY };
+                w.moveTarget = {x:p.worldX,y:p.worldY};
                 w.state = 'MOVE';
             }
         });
+    });
+
+    /* ---- BUY WORKER ---- */
+    buyBtn = this.add.rectangle(700,50,90,30,0x4444ff).setInteractive();
+    buyText = this.add.text(655,42,'Buy Worker',{font:'14px Arial',fill:'#fff'});
+    buyBtn.cooldown = 0;
+
+    buyBtn.on('pointerdown',()=>{
+        if (buyBtn.cooldown>0) return;
+        if (bucket.storage.crystal < WORKER_COST) return;
+
+        bucket.storage.crystal -= WORKER_COST;
+        spawnWorker(this, buyBtn.x-40, buyBtn.y+60);
+        buyBtn.cooldown = WORKER_COOLDOWN;
     });
 }
 
 /* =========================
    WORKERS
 ========================= */
-function spawnWorker(scene, x, y) {
-    const sprite = scene.physics.add.sprite(x, y, 'character');
+function spawnWorker(scene,x,y) {
+    const sprite = scene.physics.add.sprite(x,y,'character');
     sprite.setFrame(35); // idle down
 
     const worker = {
         sprite,
-        state: 'IDLE',
-        inventory: 0,
-        maxCarry: 20,
-        harvestingType: null,
-        targetResource: null,
-        moveTarget: null,
-        harvestTimer: 0
+        state:'IDLE',
+        inventory:0,
+        maxCarry:20,
+        harvestingType:null,
+        targetResource:null,
+        moveTarget:null,
+        harvestTimer:0
     };
 
     workers.push(worker);
 
-    scene.physics.add.overlap(sprite, bucket, () => {
-        if (worker.inventory > 0) {
-            bucket.storage[worker.harvestingType] += worker.inventory;
-            worker.inventory = 0;
-
-            if (worker.targetResource?.value > 0) {
-                worker.state = 'MOVE_TO_RESOURCE';
-            } else {
-                worker.state = 'IDLE';
-            }
+    scene.physics.add.overlap(sprite,bucket,()=>{
+        if (worker.inventory>0) {
+            bucket.storage[worker.harvestingType]+=worker.inventory;
+            worker.inventory=0;
+            worker.state = worker.targetResource?.value>0
+                ? 'MOVE_TO_RESOURCE'
+                : 'IDLE';
         }
     });
 }
@@ -201,72 +229,57 @@ function spawnRandomResource(scene) {
         Phaser.Math.Between(120,520),
         t.key
     );
-
-    const bar = scene.add.graphics();
-    const res = { ...t, sprite, bar, max:t.value, timer:0 };
-    resources.push(res);
+    resources.push({ ...t, sprite, max:t.value, timer:0 });
 }
 
 /* =========================
    UPDATE
 ========================= */
-function update(time, delta) {
+function update(time,delta) {
     uiDiv.textContent =
-        `TREE: ${bucket.storage.tree}\n` +
-        `ROCK: ${bucket.storage.rock}\n` +
+        `TREE: ${bucket.storage.tree}\n`+
+        `ROCK: ${bucket.storage.rock}\n`+
         `CRYSTAL: ${bucket.storage.crystal}`;
 
-    if (buyBtn.cooldown > 0) {
-        buyBtn.cooldown -= delta;
-        buyBtn.setFillStyle(0x333333);
-    } else {
-        buyBtn.setFillStyle(0x4444ff);
-    }
+    if (buyBtn.cooldown>0) buyBtn.cooldown-=delta;
 
-    workers.forEach(w => {
-        if (w.state === 'MOVE') {
-            moveTowards(w, w.moveTarget, () => w.state='IDLE');
-        }
+    workers.forEach(w=>{
+        if (w.state==='MOVE')
+            moveTowards(w,w.moveTarget,()=>w.state='IDLE');
 
-        if (w.state === 'MOVE_TO_RESOURCE') {
-            moveTowards(w, w.targetResource.sprite, () => {
-                w.harvestingType = w.targetResource.key;
-                w.state = 'HARVESTING';
+        if (w.state==='MOVE_TO_RESOURCE')
+            moveTowards(w,w.targetResource.sprite,()=>{
+                w.harvestingType=w.targetResource.key;
+                w.state='HARVESTING';
             });
-        }
 
-        if (w.state === 'HARVESTING') {
-            const r = w.targetResource;
-            w.harvestTimer += delta;
-
-            if (w.harvestTimer >= r.interval) {
-                w.harvestTimer = 0;
-                const amt = Math.min(5, r.value, w.maxCarry - w.inventory);
-                r.value -= amt;
-                w.inventory += amt;
-
-                if (r.value <= 0 || w.inventory >= w.maxCarry) {
-                    w.state = 'MOVE_TO_BUCKET';
-                }
+        if (w.state==='HARVESTING') {
+            const r=w.targetResource;
+            w.harvestTimer+=delta;
+            if (w.harvestTimer>=r.interval) {
+                w.harvestTimer=0;
+                const amt=Math.min(5,r.value,w.maxCarry-w.inventory);
+                r.value-=amt;
+                w.inventory+=amt;
+                if (w.inventory>=w.maxCarry||r.value<=0)
+                    w.state='MOVE_TO_BUCKET';
             }
         }
 
-        if (w.state === 'MOVE_TO_BUCKET') {
-            moveTowards(w, bucket, () => w.state='IDLE');
-        }
+        if (w.state==='MOVE_TO_BUCKET')
+            moveTowards(w,bucket,()=>w.state='IDLE');
     });
 }
 
 /* =========================
    MOVEMENT + ANIMATION
 ========================= */
-function moveTowards(worker, target, onArrive) {
-    const s = worker.sprite;
-    const dx = target.x - s.x;
-    const dy = target.y - s.y;
-    const d = Math.hypot(dx, dy);
+function moveTowards(worker,target,onArrive) {
+    const s=worker.sprite;
+    const dx=target.x-s.x, dy=target.y-s.y;
+    const d=Math.hypot(dx,dy);
 
-    if (d < 5) {
+    if (d<5) {
         s.setVelocity(0);
         s.anims.stop();
         s.setFrame(35);
@@ -274,23 +287,21 @@ function moveTowards(worker, target, onArrive) {
         return;
     }
 
-    const vx = dx/d * MOVE_SPEED;
-    const vy = dy/d * MOVE_SPEED;
-    s.setVelocity(vx, vy);
+    const vx=dx/d*MOVE_SPEED, vy=dy/d*MOVE_SPEED;
+    s.setVelocity(vx,vy);
 
-    const angle = Phaser.Math.RadToDeg(Math.atan2(vy, vx));
-    let dir = 'down';
-
-    if (angle < -157 || angle > 157) dir='left';
-    else if (angle < -112) dir='upL';
-    else if (angle < -67) dir='up';
-    else if (angle < -22) dir='upR';
-    else if (angle < 22) dir='right';
-    else if (angle < 67) dir='downR';
-    else if (angle < 112) dir='down';
+    const a=Phaser.Math.RadToDeg(Math.atan2(vy,vx));
+    let dir='down';
+    if (a<-157||a>157) dir='left';
+    else if (a<-112) dir='upL';
+    else if (a<-67) dir='up';
+    else if (a<-22) dir='upR';
+    else if (a<22) dir='right';
+    else if (a<67) dir='downR';
+    else if (a<112) dir='down';
     else dir='downL';
 
-    if (s.anims.currentAnim?.key !== dir) s.play(dir);
+    if (s.anims.currentAnim?.key!==dir) s.play(dir);
 }
 </script>
 </body>
