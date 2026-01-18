@@ -57,7 +57,7 @@ const config = {
 new Phaser.Game(config);
 
 /* =========================
-   GLOBAL STATE
+   STATE
 ========================= */
 let workers = [];
 let resources = [];
@@ -66,7 +66,7 @@ let bucket;
 let dragStart = null;
 let selectionGraphics;
 let uiDiv = document.getElementById('ui');
-let buyBtn, buyText;
+let buyBtn;
 
 /* =========================
    PRELOAD
@@ -77,7 +77,8 @@ function preload() {
     this.load.image('rock', 'assets/rock.png');
     this.load.image('crystal', 'assets/crystal.png');
     this.load.image('bucket', 'assets/bucket.png');
-    this.load.spritesheet('character','assets/character.png',{
+
+    this.load.spritesheet('character', 'assets/character.png', {
         frameWidth: 32,
         frameHeight: 32
     });
@@ -89,24 +90,23 @@ function preload() {
 function create() {
     this.add.image(400, 300, 'background').setDepth(-10);
 
-    /* --- ANIMATIONS (FIXED) --- */
+    /* ---- ANIMATIONS (FIXED) ---- */
+    // Idle: row 5 frame 4 → index 35
     this.anims.create({
         key: 'worker-idle',
-        frames: this.anims.generateFrameNumbers('character', {
-            start: 0,
-            end: 7
-        }),
-        frameRate: 4,
+        frames: [{ key: 'character', frame: 35 }],
+        frameRate: 1,
         repeat: -1
     });
 
+    // Walk down: row 5 frames 1–8 → indices 32–39
     this.anims.create({
         key: 'worker-walk',
         frames: this.anims.generateFrameNumbers('character', {
-            start: 8,
-            end: 15
+            start: 32,
+            end: 39
         }),
-        frameRate: 10,
+        frameRate: 8,
         repeat: -1
     });
 
@@ -152,8 +152,9 @@ function create() {
         );
 
         workers.forEach(w => {
-            if (Phaser.Geom.Rectangle.Contains(rect, w.sprite.x, w.sprite.y))
+            if (Phaser.Geom.Rectangle.Contains(rect, w.sprite.x, w.sprite.y)) {
                 selectedWorkers.push(w);
+            }
         });
 
         dragStart = null;
@@ -184,7 +185,7 @@ function create() {
    SPAWNERS
 ========================= */
 function spawnWorker(scene, x, y) {
-    const sprite = scene.physics.add.sprite(x, y, 'character');
+    const sprite = scene.physics.add.sprite(x, y, 'character', 35);
     sprite.play('worker-idle');
 
     const worker = {
@@ -205,10 +206,11 @@ function spawnWorker(scene, x, y) {
             bucket.storage[worker.harvestingType] += worker.inventory;
             worker.inventory = 0;
 
-            if (worker.targetResource?.value > 0)
+            if (worker.targetResource && worker.targetResource.value > 0) {
                 worker.state = 'MOVE_TO_RESOURCE';
-            else
+            } else {
                 worker.state = 'IDLE';
+            }
         }
     });
 }
@@ -228,7 +230,7 @@ function spawnRandomResource(scene) {
 /* =========================
    UPDATE
 ========================= */
-function update(time, delta) {
+function update(_, delta) {
     uiDiv.textContent =
         `TREE: ${bucket.storage.tree}\n` +
         `ROCK: ${bucket.storage.rock}\n` +
@@ -236,17 +238,18 @@ function update(time, delta) {
 
     workers.forEach(w => {
         const s = w.sprite;
-
         s.setTint(selectedWorkers.includes(w) ? 0x00ff00 : 0xffffff);
 
-        if (w.state === 'MOVE')
+        if (w.state === 'MOVE') {
             moveTowards(s, w.moveTarget, () => w.state='IDLE');
+        }
 
-        if (w.state === 'MOVE_TO_RESOURCE')
+        if (w.state === 'MOVE_TO_RESOURCE') {
             moveTowards(s, w.targetResource.sprite, () => {
                 w.harvestingType = w.targetResource.key;
                 w.state = 'HARVESTING';
             });
+        }
 
         if (w.state === 'HARVESTING') {
             const r = w.targetResource;
@@ -258,13 +261,15 @@ function update(time, delta) {
                 r.value -= amt;
                 w.inventory += amt;
 
-                if (w.inventory >= w.maxCarry || r.value <= 0)
+                if (r.value <= 0 || w.inventory >= w.maxCarry) {
                     w.state = 'MOVE_TO_BUCKET';
+                }
             }
         }
 
-        if (w.state === 'MOVE_TO_BUCKET')
+        if (w.state === 'MOVE_TO_BUCKET') {
             moveTowards(s, bucket, () => w.state='IDLE');
+        }
     });
 }
 
@@ -276,14 +281,17 @@ function moveTowards(sprite, target, onArrive) {
     const dy = target.y - sprite.y;
     const d = Math.hypot(dx, dy);
 
-    if (d < 6) {
+    if (d < 5) {
         sprite.setVelocity(0);
-        sprite.play('worker-idle', true);
+        if (sprite.anims.currentAnim?.key !== 'worker-idle') {
+            sprite.play('worker-idle');
+        }
         onArrive?.();
     } else {
         sprite.setVelocity(dx/d * MOVE_SPEED, dy/d * MOVE_SPEED);
-        sprite.play('worker-walk', true);
-        sprite.setFlipX(dx < 0);
+        if (sprite.anims.currentAnim?.key !== 'worker-walk') {
+            sprite.play('worker-walk');
+        }
     }
 }
 </script>
