@@ -38,7 +38,6 @@ canvas {
 ========================= */
 const MOVE_SPEED = 90;
 const WORKER_COST = 100;
-const WORKER_COOLDOWN = 3000;
 const FORMATION_RADIUS = 26;
 
 const RESOURCE_TYPES = [
@@ -91,11 +90,11 @@ function create() {
     this.add.image(400,300,'background').setDepth(-10);
 
     /* ---- ANIMATIONS ---- */
-    const dirs = ['up','upR','right','downR','down','downL','left','upL'];
+    const dirs=['up','upR','right','downR','down','downL','left','upL'];
     for (let i=0;i<dirs.length;i++) {
         this.anims.create({
-            key: dirs[i],
-            frames: this.anims.generateFrameNumbers('character',{
+            key:dirs[i],
+            frames:this.anims.generateFrameNumbers('character',{
                 start:i*8,end:i*8+7
             }),
             frameRate:8,
@@ -116,14 +115,11 @@ function create() {
     /* ---- BUY WORKER ---- */
     buyBtn = this.add.rectangle(700,50,90,30,0x4444ff).setInteractive();
     this.add.text(655,42,'Buy Worker',{font:'14px Arial',fill:'#fff'});
-    buyBtn.cooldown = 0;
 
     buyBtn.on('pointerdown',()=>{
-        if (buyBtn.cooldown>0) return;
-        if (bucket.storage.crystal<WORKER_COST) return;
-        bucket.storage.crystal-=WORKER_COST;
+        if (bucket.storage.crystal < WORKER_COST) return;
+        bucket.storage.crystal -= WORKER_COST;
         spawnWorker(this,660,100);
-        buyBtn.cooldown = WORKER_COOLDOWN;
     });
 
     /* ---- SELECTION ---- */
@@ -147,13 +143,37 @@ function create() {
     });
 
     this.input.on('pointerup',p=>{
-        if (p.rightButtonDown()) return;
+        /* ---- RIGHT CLICK COMMAND ---- */
+        if (p.rightButtonReleased()) {
+            if (selectedWorkers.length === 0) return;
+
+            const res = resources.find(r =>
+                Phaser.Geom.Rectangle.Contains(r.sprite.getBounds(),p.worldX,p.worldY)
+            );
+
+            const center = res ? res.sprite : { x:p.worldX, y:p.worldY };
+            const targets = getFormationTargets(center, selectedWorkers.length);
+
+            selectedWorkers.forEach((w,i)=>{
+                w.moveTarget = targets[i];
+                if (res) {
+                    w.targetResource = res;
+                    w.state = 'MOVE_TO_RESOURCE';
+                } else {
+                    w.state = 'MOVE';
+                }
+            });
+            return;
+        }
+
+        /* ---- LEFT CLICK SELECTION ---- */
+        if (!dragStart) return;
 
         dragGraphics.clear();
         selectedWorkers = [];
 
         const dist = Phaser.Math.Distance.Between(
-            dragStart.x,dragStart.y,p.worldX,p.worldY
+            dragStart.x, dragStart.y, p.worldX, p.worldY
         );
 
         if (dist < 5) {
@@ -176,29 +196,6 @@ function create() {
 
         dragStart = null;
     });
-
-    /* ---- COMMAND ---- */
-    this.input.on('pointerup',p=>{
-        if (!p.rightButtonReleased()) return;
-        if (selectedWorkers.length===0) return;
-
-        const res = resources.find(r =>
-            Phaser.Geom.Rectangle.Contains(r.sprite.getBounds(),p.worldX,p.worldY)
-        );
-
-        const center = res ? res.sprite : { x:p.worldX, y:p.worldY };
-        const targets = getFormationTargets(center, selectedWorkers.length);
-
-        selectedWorkers.forEach((w,i)=>{
-            w.moveTarget = targets[i];
-            if (res) {
-                w.targetResource = res;
-                w.state = 'MOVE_TO_RESOURCE';
-            } else {
-                w.state = 'MOVE';
-            }
-        });
-    });
 }
 
 /* =========================
@@ -213,7 +210,6 @@ function spawnWorker(scene,x,y) {
         state:'IDLE',
         inventory:0,
         maxCarry:20,
-        harvestingType:null,
         targetResource:null,
         moveTarget:null,
         harvestTimer:0
@@ -222,7 +218,7 @@ function spawnWorker(scene,x,y) {
 
     scene.physics.add.overlap(s,bucket,()=>{
         if (w.inventory>0) {
-            bucket.storage[w.harvestingType]+=w.inventory;
+            bucket.storage[w.targetResource.key]+=w.inventory;
             w.inventory=0;
             w.state = w.targetResource?.value>0 ? 'MOVE_TO_RESOURCE' : 'IDLE';
         }
@@ -245,13 +241,11 @@ function spawnRandomResource(scene) {
 /* =========================
    UPDATE
 ========================= */
-function update(time,delta) {
+function update(_,delta) {
     uiDiv.textContent =
         `TREE: ${bucket.storage.tree}\n`+
         `ROCK: ${bucket.storage.rock}\n`+
         `CRYSTAL: ${bucket.storage.crystal}`;
-
-    if (buyBtn.cooldown>0) buyBtn.cooldown-=delta;
 
     workers.forEach(w=>{
         const s=w.sprite;
@@ -261,25 +255,7 @@ function update(time,delta) {
             moveTowards(w,w.moveTarget,()=>w.state='IDLE');
 
         if (w.state==='MOVE_TO_RESOURCE' && w.moveTarget)
-            moveTowards(w,w.moveTarget,()=>{
-                w.harvestingType=w.targetResource.key;
-                w.state='HARVESTING';
-            });
-
-        if (w.state==='HARVESTING') {
-            w.harvestTimer+=delta;
-            if (w.harvestTimer>=w.targetResource.interval) {
-                w.harvestTimer=0;
-                const amt=Math.min(5,w.targetResource.value,w.maxCarry-w.inventory);
-                w.targetResource.value-=amt;
-                w.inventory+=amt;
-                if (w.inventory>=w.maxCarry||w.targetResource.value<=0)
-                    w.state='MOVE_TO_BUCKET';
-            }
-        }
-
-        if (w.state==='MOVE_TO_BUCKET')
-            moveTowards(w,bucket,()=>w.state='IDLE');
+            moveTowards(w,w.moveTarget,()=>w.state='HARVESTING');
     });
 }
 
