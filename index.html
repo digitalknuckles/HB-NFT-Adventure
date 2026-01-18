@@ -7,25 +7,25 @@
 <script src="https://cdn.jsdelivr.net/npm/phaser@3.85.2/dist/phaser.min.js"></script>
 
 <style>
-    body {
-        margin: 0;
-        background: #111;
-        user-select: none;
-    }
-    canvas {
-        display: block;
-        margin: auto;
-        border: 1px solid #333;
-    }
-    #ui {
-        position: absolute;
-        top: 10px;
-        left: 10px;
-        color: #0f0;
-        font-family: monospace;
-        font-size: 14px;
-        white-space: pre;
-    }
+body {
+    margin: 0;
+    background: #111;
+    user-select: none;
+}
+canvas {
+    display: block;
+    margin: auto;
+    border: 1px solid #333;
+}
+#ui {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    color: #0f0;
+    font-family: monospace;
+    font-size: 14px;
+    white-space: pre;
+}
 </style>
 </head>
 
@@ -39,21 +39,21 @@
 const MOVE_SPEED = 90;
 const WORKER_COST = 100;
 const WORKER_COOLDOWN = 3000;
+const FORMATION_RADIUS = 26;
 
 const RESOURCE_TYPES = [
-    { key: 'tree', value: 300, interval: 600 },
-    { key: 'rock', value: 500, interval: 900 },
-    { key: 'crystal', value: 800, interval: 1400 }
+    { key:'tree', value:300, interval:600 },
+    { key:'rock', value:500, interval:900 },
+    { key:'crystal', value:800, interval:1400 }
 ];
 
 const config = {
     type: Phaser.AUTO,
     width: 800,
     height: 600,
-    physics: { default: 'arcade' },
+    physics: { default:'arcade' },
     scene: { preload, create, update }
 };
-
 new Phaser.Game(config);
 
 /* =========================
@@ -67,20 +67,20 @@ let uiDiv = document.getElementById('ui');
 
 let dragStart = null;
 let dragGraphics;
-let buyBtn, buyText;
+let buyBtn;
 
 /* =========================
    PRELOAD
 ========================= */
 function preload() {
-    this.load.image('background', 'assets/background1.png');
-    this.load.image('tree', 'assets/resource.png');
-    this.load.image('rock', 'assets/rock.png');
-    this.load.image('crystal', 'assets/crystal.png');
-    this.load.image('bucket', 'assets/bucket.png');
+    this.load.image('background','assets/background1.png');
+    this.load.image('tree','assets/resource.png');
+    this.load.image('rock','assets/rock.png');
+    this.load.image('crystal','assets/crystal.png');
+    this.load.image('bucket','assets/bucket.png');
     this.load.spritesheet('character','assets/character.png',{
-        frameWidth: 32,
-        frameHeight: 32
+        frameWidth:32,
+        frameHeight:32
     });
 }
 
@@ -91,106 +91,116 @@ function create() {
     this.add.image(400,300,'background').setDepth(-10);
 
     /* ---- ANIMATIONS ---- */
-    const directions = ['up','upR','right','downR','down','downL','left','upL'];
-    for (let i = 0; i < directions.length; i++) {
+    const dirs = ['up','upR','right','downR','down','downL','left','upL'];
+    for (let i=0;i<dirs.length;i++) {
         this.anims.create({
-            key: directions[i],
+            key: dirs[i],
             frames: this.anims.generateFrameNumbers('character',{
-                start: i * 8,
-                end: i * 8 + 7
+                start:i*8,end:i*8+7
             }),
-            frameRate: 8,
-            repeat: -1
+            frameRate:8,
+            repeat:-1
         });
     }
 
-    bucket = this.physics.add.staticSprite(400, 300, 'bucket');
+    bucket = this.physics.add.staticSprite(400,300,'bucket');
     bucket.storage = { tree:0, rock:0, crystal:0 };
 
-    spawnWorker(this, 360, 340);
-    spawnWorker(this, 440, 340);
+    spawnWorker(this,360,340);
+    spawnWorker(this,440,340);
 
     spawnRandomResource(this);
     spawnRandomResource(this);
     spawnRandomResource(this);
 
     /* ---- BUY WORKER ---- */
-    buyBtn = this.add.rectangle(700, 50, 90, 30, 0x4444ff).setInteractive();
-    buyText = this.add.text(655, 42, 'Buy Worker', { font:'14px Arial', fill:'#fff' });
+    buyBtn = this.add.rectangle(700,50,90,30,0x4444ff).setInteractive();
+    this.add.text(655,42,'Buy Worker',{font:'14px Arial',fill:'#fff'});
     buyBtn.cooldown = 0;
 
-    buyBtn.on('pointerdown', () => {
-        if (buyBtn.cooldown > 0) return;
-        if (bucket.storage.crystal < WORKER_COST) return;
-
-        bucket.storage.crystal -= WORKER_COST;
-        spawnWorker(this, buyBtn.x - 40, buyBtn.y + 60);
+    buyBtn.on('pointerdown',()=>{
+        if (buyBtn.cooldown>0) return;
+        if (bucket.storage.crystal<WORKER_COST) return;
+        bucket.storage.crystal-=WORKER_COST;
+        spawnWorker(this,660,100);
         buyBtn.cooldown = WORKER_COOLDOWN;
     });
 
     /* ---- SELECTION ---- */
     dragGraphics = this.add.graphics();
 
-    this.input.on('pointerdown', p => {
+    this.input.on('pointerdown',p=>{
         if (p.rightButtonDown()) return;
 
         dragStart = { x:p.worldX, y:p.worldY };
-        selectedWorkers = [];
-
-        // single click select
-        workers.forEach(w => {
-            if (Phaser.Math.Distance.Between(w.sprite.x,w.sprite.y,p.worldX,p.worldY) < 16) {
-                selectedWorkers.push(w);
-            }
-        });
     });
 
-    this.input.on('pointermove', p => {
+    this.input.on('pointermove',p=>{
         if (!dragStart) return;
         dragGraphics.clear();
         dragGraphics.lineStyle(1,0x00ff00);
         dragGraphics.strokeRect(
             dragStart.x,
             dragStart.y,
-            p.worldX - dragStart.x,
-            p.worldY - dragStart.y
+            p.worldX-dragStart.x,
+            p.worldY-dragStart.y
         );
     });
 
-    this.input.on('pointerup', p => {
+    this.input.on('pointerup',p=>{
         if (p.rightButtonDown()) return;
 
-        if (dragStart) {
+        dragGraphics.clear();
+
+        const dist = Phaser.Math.Distance.Between(
+            dragStart.x,dragStart.y,p.worldX,p.worldY
+        );
+
+        selectedWorkers = [];
+
+        if (dist < 5) {
+            // SINGLE CLICK
+            workers.forEach(w=>{
+                if (Phaser.Math.Distance.Between(
+                    w.sprite.x,w.sprite.y,p.worldX,p.worldY
+                ) < 16) selectedWorkers.push(w);
+            });
+        } else {
+            // DRAG SELECT
             const rect = new Phaser.Geom.Rectangle(
                 Math.min(dragStart.x,p.worldX),
                 Math.min(dragStart.y,p.worldY),
                 Math.abs(p.worldX-dragStart.x),
                 Math.abs(p.worldY-dragStart.y)
             );
-
             selectedWorkers = workers.filter(w =>
                 Phaser.Geom.Rectangle.Contains(rect,w.sprite.x,w.sprite.y)
             );
         }
 
-        dragGraphics.clear();
         dragStart = null;
     });
 
     /* ---- COMMAND ---- */
-    this.input.on('pointerup', p => {
+    this.input.on('pointerup',p=>{
         if (!p.rightButtonReleased()) return;
+        if (selectedWorkers.length===0) return;
 
-        selectedWorkers.forEach(w => {
-            const res = resources.find(r =>
-                Phaser.Geom.Rectangle.Contains(r.sprite.getBounds(),p.worldX,p.worldY)
-            );
+        const res = resources.find(r =>
+            Phaser.Geom.Rectangle.Contains(r.sprite.getBounds(),p.worldX,p.worldY)
+        );
 
+        const targets = getFormationTargets(
+            res ? res.sprite : { x:p.worldX, y:p.worldY },
+            selectedWorkers.length
+        );
+
+        selectedWorkers.forEach((w,i)=>{
+            w.moveTarget = targets[i];
             if (res) {
                 w.targetResource = res;
                 w.state = 'MOVE_TO_RESOURCE';
             } else {
-                w.moveTarget = { x:p.worldX, y:p.worldY };
                 w.state = 'MOVE';
             }
         });
@@ -200,12 +210,12 @@ function create() {
 /* =========================
    WORKERS
 ========================= */
-function spawnWorker(scene, x, y) {
-    const sprite = scene.physics.add.sprite(x,y,'character');
-    sprite.setFrame(35); // idle down
+function spawnWorker(scene,x,y) {
+    const s = scene.physics.add.sprite(x,y,'character');
+    s.setFrame(35);
 
-    const worker = {
-        sprite,
+    const w = {
+        sprite:s,
         state:'IDLE',
         inventory:0,
         maxCarry:20,
@@ -214,19 +224,13 @@ function spawnWorker(scene, x, y) {
         moveTarget:null,
         harvestTimer:0
     };
+    workers.push(w);
 
-    workers.push(worker);
-
-    scene.physics.add.overlap(sprite,bucket,() => {
-        if (worker.inventory > 0) {
-            bucket.storage[worker.harvestingType] += worker.inventory;
-            worker.inventory = 0;
-
-            if (worker.targetResource?.value > 0) {
-                worker.state = 'MOVE_TO_RESOURCE';
-            } else {
-                worker.state = 'IDLE';
-            }
+    scene.physics.add.overlap(s,bucket,()=>{
+        if (w.inventory>0) {
+            bucket.storage[w.harvestingType]+=w.inventory;
+            w.inventory=0;
+            w.state = w.targetResource?.value>0 ? 'MOVE_TO_RESOURCE' : 'IDLE';
         }
     });
 }
@@ -236,69 +240,79 @@ function spawnWorker(scene, x, y) {
 ========================= */
 function spawnRandomResource(scene) {
     const t = Phaser.Utils.Array.GetRandom(RESOURCE_TYPES);
-    const sprite = scene.physics.add.staticSprite(
+    const s = scene.physics.add.staticSprite(
         Phaser.Math.Between(80,720),
         Phaser.Math.Between(120,520),
         t.key
     );
-    const bar = scene.add.graphics();
-    resources.push({ ...t, sprite, bar, max:t.value });
+    resources.push({ ...t, sprite:s });
 }
 
 /* =========================
    UPDATE
 ========================= */
-function update(time, delta) {
+function update(time,delta) {
     uiDiv.textContent =
-        `TREE: ${bucket.storage.tree}\n` +
-        `ROCK: ${bucket.storage.rock}\n` +
+        `TREE: ${bucket.storage.tree}\n`+
+        `ROCK: ${bucket.storage.rock}\n`+
         `CRYSTAL: ${bucket.storage.crystal}`;
 
-    if (buyBtn.cooldown > 0) buyBtn.cooldown -= delta;
+    if (buyBtn.cooldown>0) buyBtn.cooldown-=delta;
 
-    workers.forEach(w => {
+    workers.forEach(w=>{
         const s = w.sprite;
-        s.setTint(selectedWorkers.includes(w) ? 0x00ff00 : 0xffffff);
+        s.setTint(selectedWorkers.includes(w)?0x00ff00:0xffffff);
 
-        if (w.state === 'MOVE') {
+        if (w.state==='MOVE')
             moveTowards(w,w.moveTarget,()=>w.state='IDLE');
-        }
 
-        if (w.state === 'MOVE_TO_RESOURCE') {
-            moveTowards(w,w.targetResource.sprite,()=>{
-                w.harvestingType = w.targetResource.key;
+        if (w.state==='MOVE_TO_RESOURCE')
+            moveTowards(w,w.moveTarget,()=>{
+                w.harvestingType=w.targetResource.key;
                 w.state='HARVESTING';
             });
-        }
 
-        if (w.state === 'HARVESTING') {
-            const r = w.targetResource;
-            w.harvestTimer += delta;
-            if (w.harvestTimer >= r.interval) {
-                w.harvestTimer = 0;
-                const amt = Math.min(5,r.value,w.maxCarry-w.inventory);
-                r.value -= amt;
-                w.inventory += amt;
-                if (r.value<=0 || w.inventory>=w.maxCarry) w.state='MOVE_TO_BUCKET';
+        if (w.state==='HARVESTING') {
+            w.harvestTimer+=delta;
+            if (w.harvestTimer>=w.targetResource.interval) {
+                w.harvestTimer=0;
+                const amt=Math.min(5,w.targetResource.value,w.maxCarry-w.inventory);
+                w.targetResource.value-=amt;
+                w.inventory+=amt;
+                if (w.inventory>=w.maxCarry||w.targetResource.value<=0)
+                    w.state='MOVE_TO_BUCKET';
             }
         }
 
-        if (w.state === 'MOVE_TO_BUCKET') {
+        if (w.state==='MOVE_TO_BUCKET')
             moveTowards(w,bucket,()=>w.state='IDLE');
-        }
     });
+}
+
+/* =========================
+   FORMATION
+========================= */
+function getFormationTargets(center,count) {
+    const out=[];
+    for (let i=0;i<count;i++) {
+        const angle=(Math.PI*2/count)*i;
+        out.push({
+            x:center.x+Math.cos(angle)*FORMATION_RADIUS,
+            y:center.y+Math.sin(angle)*FORMATION_RADIUS
+        });
+    }
+    return out;
 }
 
 /* =========================
    MOVEMENT + ANIMATION
 ========================= */
-function moveTowards(worker,target,onArrive) {
-    const s = worker.sprite;
-    const dx = target.x - s.x;
-    const dy = target.y - s.y;
-    const d = Math.hypot(dx,dy);
+function moveTowards(w,t,onArrive) {
+    const s=w.sprite;
+    const dx=t.x-s.x, dy=t.y-s.y;
+    const d=Math.hypot(dx,dy);
 
-    if (d < 5) {
+    if (d<5) {
         s.setVelocity(0);
         s.anims.stop();
         s.setFrame(35);
@@ -306,19 +320,17 @@ function moveTowards(worker,target,onArrive) {
         return;
     }
 
-    const vx = dx/d * MOVE_SPEED;
-    const vy = dy/d * MOVE_SPEED;
-    s.setVelocity(vx,vy);
+    s.setVelocity(dx/d*MOVE_SPEED,dy/d*MOVE_SPEED);
 
-    const angle = Phaser.Math.RadToDeg(Math.atan2(vy,vx));
+    const a=Phaser.Math.RadToDeg(Math.atan2(dy,dx));
     let dir='down';
-    if (angle<-157||angle>157) dir='left';
-    else if (angle<-112) dir='upL';
-    else if (angle<-67) dir='up';
-    else if (angle<-22) dir='upR';
-    else if (angle<22) dir='right';
-    else if (angle<67) dir='downR';
-    else if (angle<112) dir='down';
+    if (a<-157||a>157) dir='left';
+    else if (a<-112) dir='upL';
+    else if (a<-67) dir='up';
+    else if (a<-22) dir='upR';
+    else if (a<22) dir='right';
+    else if (a<67) dir='downR';
+    else if (a<112) dir='down';
     else dir='downL';
 
     if (s.anims.currentAnim?.key!==dir) s.play(dir);
