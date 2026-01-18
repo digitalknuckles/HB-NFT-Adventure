@@ -37,8 +37,6 @@
    CONFIG
 ========================= */
 const MOVE_SPEED = 90;
-const WORKER_COST = 100;
-const WORKER_COOLDOWN = 5000;
 
 const RESOURCE_TYPES = [
     { key: 'tree', value: 300, interval: 600 },
@@ -63,10 +61,7 @@ let workers = [];
 let resources = [];
 let selectedWorkers = [];
 let bucket;
-let dragStart = null;
-let selectionGraphics;
 let uiDiv = document.getElementById('ui');
-let buyBtn;
 
 /* =========================
    PRELOAD
@@ -77,8 +72,7 @@ function preload() {
     this.load.image('rock', 'assets/rock.png');
     this.load.image('crystal', 'assets/crystal.png');
     this.load.image('bucket', 'assets/bucket.png');
-
-    this.load.spritesheet('character', 'assets/character.png', {
+    this.load.spritesheet('character','assets/character.png',{
         frameWidth: 32,
         frameHeight: 32
     });
@@ -88,27 +82,22 @@ function preload() {
    CREATE
 ========================= */
 function create() {
-    this.add.image(400, 300, 'background').setDepth(-10);
+    this.add.image(400,300,'background').setDepth(-10);
 
-    /* ---- ANIMATIONS (FIXED) ---- */
-    // Idle: row 5 frame 4 → index 35
-    this.anims.create({
-        key: 'worker-idle',
-        frames: [{ key: 'character', frame: 35 }],
-        frameRate: 1,
-        repeat: -1
-    });
+    /* ---- ANIMATIONS ---- */
+    const directions = ['up','upR','right','downR','down','downL','left','upL'];
 
-    // Walk down: row 5 frames 1–8 → indices 32–39
-    this.anims.create({
-        key: 'worker-walk',
-        frames: this.anims.generateFrameNumbers('character', {
-            start: 32,
-            end: 39
-        }),
-        frameRate: 8,
-        repeat: -1
-    });
+    for (let i = 0; i < directions.length; i++) {
+        this.anims.create({
+            key: directions[i],
+            frames: this.anims.generateFrameNumbers('character', {
+                start: i * 8,
+                end: i * 8 + 7
+            }),
+            frameRate: 8,
+            repeat: -1
+        });
+    }
 
     bucket = this.physics.add.staticSprite(400, 300, 'bucket');
     bucket.storage = { tree: 0, rock: 0, crystal: 0 };
@@ -120,48 +109,14 @@ function create() {
     spawnRandomResource(this);
     spawnRandomResource(this);
 
-    selectionGraphics = this.add.graphics();
-
-    /* ---- SELECTION ---- */
+    /* ---- INPUT ---- */
     this.input.on('pointerdown', p => {
         if (p.rightButtonDown()) return;
-        dragStart = { x: p.worldX, y: p.worldY };
-        selectedWorkers = [];
-    });
-
-    this.input.on('pointermove', p => {
-        if (!dragStart) return;
-        selectionGraphics.clear();
-        selectionGraphics.lineStyle(1, 0x00ff00);
-        selectionGraphics.strokeRect(
-            dragStart.x,
-            dragStart.y,
-            p.worldX - dragStart.x,
-            p.worldY - dragStart.y
+        selectedWorkers = workers.filter(w =>
+            Phaser.Math.Distance.Between(w.sprite.x,w.sprite.y,p.worldX,p.worldY) < 32
         );
     });
 
-    this.input.on('pointerup', p => {
-        if (p.rightButtonDown() || !dragStart) return;
-
-        const rect = new Phaser.Geom.Rectangle(
-            Math.min(dragStart.x, p.worldX),
-            Math.min(dragStart.y, p.worldY),
-            Math.abs(p.worldX - dragStart.x),
-            Math.abs(p.worldY - dragStart.y)
-        );
-
-        workers.forEach(w => {
-            if (Phaser.Geom.Rectangle.Contains(rect, w.sprite.x, w.sprite.y)) {
-                selectedWorkers.push(w);
-            }
-        });
-
-        dragStart = null;
-        selectionGraphics.clear();
-    });
-
-    /* ---- COMMAND ---- */
     this.input.on('pointerup', p => {
         if (!p.rightButtonReleased()) return;
 
@@ -174,7 +129,7 @@ function create() {
                 w.targetResource = res;
                 w.state = 'MOVE_TO_RESOURCE';
             } else {
-                w.moveTarget = { x: p.worldX, y: p.worldY };
+                w.moveTarget = { x:p.worldX, y:p.worldY };
                 w.state = 'MOVE';
             }
         });
@@ -182,11 +137,13 @@ function create() {
 }
 
 /* =========================
-   SPAWNERS
+   WORKERS
 ========================= */
 function spawnWorker(scene, x, y) {
-    const sprite = scene.physics.add.sprite(x, y, 'character', 35);
-    sprite.play('worker-idle');
+    const sprite = scene.physics.add.sprite(x, y, 'character');
+
+    // TRUE IDLE FRAME → row 5 frame 4 → index 35
+    sprite.setFrame(35);
 
     const worker = {
         sprite,
@@ -206,7 +163,7 @@ function spawnWorker(scene, x, y) {
             bucket.storage[worker.harvestingType] += worker.inventory;
             worker.inventory = 0;
 
-            if (worker.targetResource && worker.targetResource.value > 0) {
+            if (worker.targetResource?.value > 0) {
                 worker.state = 'MOVE_TO_RESOURCE';
             } else {
                 worker.state = 'IDLE';
@@ -215,6 +172,9 @@ function spawnWorker(scene, x, y) {
     });
 }
 
+/* =========================
+   RESOURCES
+========================= */
 function spawnRandomResource(scene) {
     const t = Phaser.Utils.Array.GetRandom(RESOURCE_TYPES);
     const sprite = scene.physics.add.staticSprite(
@@ -224,13 +184,14 @@ function spawnRandomResource(scene) {
     );
 
     const bar = scene.add.graphics();
-    resources.push({ ...t, sprite, bar, max: t.value, timer: 0 });
+    const res = { ...t, sprite, bar, max:t.value, timer:0 };
+    resources.push(res);
 }
 
 /* =========================
    UPDATE
 ========================= */
-function update(_, delta) {
+function update(time, delta) {
     uiDiv.textContent =
         `TREE: ${bucket.storage.tree}\n` +
         `ROCK: ${bucket.storage.rock}\n` +
@@ -238,14 +199,13 @@ function update(_, delta) {
 
     workers.forEach(w => {
         const s = w.sprite;
-        s.setTint(selectedWorkers.includes(w) ? 0x00ff00 : 0xffffff);
 
         if (w.state === 'MOVE') {
-            moveTowards(s, w.moveTarget, () => w.state='IDLE');
+            moveTowards(w, w.moveTarget, () => w.state='IDLE');
         }
 
         if (w.state === 'MOVE_TO_RESOURCE') {
-            moveTowards(s, w.targetResource.sprite, () => {
+            moveTowards(w, w.targetResource.sprite, () => {
                 w.harvestingType = w.targetResource.key;
                 w.state = 'HARVESTING';
             });
@@ -268,30 +228,46 @@ function update(_, delta) {
         }
 
         if (w.state === 'MOVE_TO_BUCKET') {
-            moveTowards(s, bucket, () => w.state='IDLE');
+            moveTowards(w, bucket, () => w.state='IDLE');
         }
     });
 }
 
 /* =========================
-   HELPERS
+   MOVEMENT + ANIMATION
 ========================= */
-function moveTowards(sprite, target, onArrive) {
-    const dx = target.x - sprite.x;
-    const dy = target.y - sprite.y;
+function moveTowards(worker, target, onArrive) {
+    const s = worker.sprite;
+    const dx = target.x - s.x;
+    const dy = target.y - s.y;
     const d = Math.hypot(dx, dy);
 
     if (d < 5) {
-        sprite.setVelocity(0);
-        if (sprite.anims.currentAnim?.key !== 'worker-idle') {
-            sprite.play('worker-idle');
-        }
+        s.setVelocity(0);
+        s.anims.stop();
+        s.setFrame(35); // idle down
         onArrive?.();
-    } else {
-        sprite.setVelocity(dx/d * MOVE_SPEED, dy/d * MOVE_SPEED);
-        if (sprite.anims.currentAnim?.key !== 'worker-walk') {
-            sprite.play('worker-walk');
-        }
+        return;
+    }
+
+    const vx = dx/d * MOVE_SPEED;
+    const vy = dy/d * MOVE_SPEED;
+    s.setVelocity(vx, vy);
+
+    const angle = Phaser.Math.RadToDeg(Math.atan2(vy, vx));
+
+    let dir = 'down';
+    if (angle < -157 || angle > 157) dir='left';
+    else if (angle < -112) dir='upL';
+    else if (angle < -67) dir='up';
+    else if (angle < -22) dir='upR';
+    else if (angle < 22) dir='right';
+    else if (angle < 67) dir='downR';
+    else if (angle < 112) dir='down';
+    else dir='downL';
+
+    if (s.anims.currentAnim?.key !== dir) {
+        s.play(dir);
     }
 }
 </script>
