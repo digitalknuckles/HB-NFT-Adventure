@@ -131,7 +131,6 @@ function create() {
 
     this.input.on('pointerdown',p=>{
         if (p.rightButtonDown()) return;
-
         dragStart = { x:p.worldX, y:p.worldY };
     });
 
@@ -151,22 +150,19 @@ function create() {
         if (p.rightButtonDown()) return;
 
         dragGraphics.clear();
+        selectedWorkers = [];
 
         const dist = Phaser.Math.Distance.Between(
             dragStart.x,dragStart.y,p.worldX,p.worldY
         );
 
-        selectedWorkers = [];
-
         if (dist < 5) {
-            // SINGLE CLICK
             workers.forEach(w=>{
                 if (Phaser.Math.Distance.Between(
                     w.sprite.x,w.sprite.y,p.worldX,p.worldY
                 ) < 16) selectedWorkers.push(w);
             });
         } else {
-            // DRAG SELECT
             const rect = new Phaser.Geom.Rectangle(
                 Math.min(dragStart.x,p.worldX),
                 Math.min(dragStart.y,p.worldY),
@@ -190,10 +186,8 @@ function create() {
             Phaser.Geom.Rectangle.Contains(r.sprite.getBounds(),p.worldX,p.worldY)
         );
 
-        const targets = getFormationTargets(
-            res ? res.sprite : { x:p.worldX, y:p.worldY },
-            selectedWorkers.length
-        );
+        const center = res ? res.sprite : { x:p.worldX, y:p.worldY };
+        const targets = getFormationTargets(center, selectedWorkers.length);
 
         selectedWorkers.forEach((w,i)=>{
             w.moveTarget = targets[i];
@@ -260,13 +254,13 @@ function update(time,delta) {
     if (buyBtn.cooldown>0) buyBtn.cooldown-=delta;
 
     workers.forEach(w=>{
-        const s = w.sprite;
+        const s=w.sprite;
         s.setTint(selectedWorkers.includes(w)?0x00ff00:0xffffff);
 
-        if (w.state==='MOVE')
+        if (w.state==='MOVE' && w.moveTarget)
             moveTowards(w,w.moveTarget,()=>w.state='IDLE');
 
-        if (w.state==='MOVE_TO_RESOURCE')
+        if (w.state==='MOVE_TO_RESOURCE' && w.moveTarget)
             moveTowards(w,w.moveTarget,()=>{
                 w.harvestingType=w.targetResource.key;
                 w.state='HARVESTING';
@@ -295,10 +289,10 @@ function update(time,delta) {
 function getFormationTargets(center,count) {
     const out=[];
     for (let i=0;i<count;i++) {
-        const angle=(Math.PI*2/count)*i;
+        const a=(Math.PI*2/count)*i;
         out.push({
-            x:center.x+Math.cos(angle)*FORMATION_RADIUS,
-            y:center.y+Math.sin(angle)*FORMATION_RADIUS
+            x:center.x+Math.cos(a)*FORMATION_RADIUS,
+            y:center.y+Math.sin(a)*FORMATION_RADIUS
         });
     }
     return out;
@@ -308,6 +302,8 @@ function getFormationTargets(center,count) {
    MOVEMENT + ANIMATION
 ========================= */
 function moveTowards(w,t,onArrive) {
+    if (!t) return;
+
     const s=w.sprite;
     const dx=t.x-s.x, dy=t.y-s.y;
     const d=Math.hypot(dx,dy);
