@@ -39,6 +39,7 @@ canvas {
 const MOVE_SPEED = 90;
 const WORKER_COST = 100;
 const FORMATION_RADIUS = 26;
+const HARVEST_AMOUNT = 5;
 
 const RESOURCE_TYPES = [
     { key:'tree', value:300, interval:600 },
@@ -122,7 +123,7 @@ function create() {
         spawnWorker(this,660,100);
     });
 
-    /* ---- SELECTION ---- */
+    /* ---- INPUT ---- */
     dragGraphics = this.add.graphics();
 
     this.input.on('pointerdown',p=>{
@@ -135,8 +136,7 @@ function create() {
         dragGraphics.clear();
         dragGraphics.lineStyle(1,0x00ff00);
         dragGraphics.strokeRect(
-            dragStart.x,
-            dragStart.y,
+            dragStart.x, dragStart.y,
             p.worldX-dragStart.x,
             p.worldY-dragStart.y
         );
@@ -145,7 +145,7 @@ function create() {
     this.input.on('pointerup',p=>{
         /* ---- RIGHT CLICK COMMAND ---- */
         if (p.rightButtonReleased()) {
-            if (selectedWorkers.length === 0) return;
+            if (!selectedWorkers.length) return;
 
             const res = resources.find(r =>
                 Phaser.Geom.Rectangle.Contains(r.sprite.getBounds(),p.worldX,p.worldY)
@@ -156,19 +156,14 @@ function create() {
 
             selectedWorkers.forEach((w,i)=>{
                 w.moveTarget = targets[i];
-                if (res) {
-                    w.targetResource = res;
-                    w.state = 'MOVE_TO_RESOURCE';
-                } else {
-                    w.state = 'MOVE';
-                }
+                w.targetResource = res ?? null;
+                w.state = res ? 'MOVE_TO_RESOURCE' : 'MOVE';
             });
             return;
         }
 
         /* ---- LEFT CLICK SELECTION ---- */
         if (!dragStart) return;
-
         dragGraphics.clear();
         selectedWorkers = [];
 
@@ -193,7 +188,6 @@ function create() {
                 Phaser.Geom.Rectangle.Contains(rect,w.sprite.x,w.sprite.y)
             );
         }
-
         dragStart = null;
     });
 }
@@ -210,17 +204,17 @@ function spawnWorker(scene,x,y) {
         state:'IDLE',
         inventory:0,
         maxCarry:20,
+        harvestTimer:0,
         targetResource:null,
-        moveTarget:null,
-        harvestTimer:0
+        moveTarget:null
     };
     workers.push(w);
 
     scene.physics.add.overlap(s,bucket,()=>{
-        if (w.inventory>0) {
-            bucket.storage[w.targetResource.key]+=w.inventory;
-            w.inventory=0;
-            w.state = w.targetResource?.value>0 ? 'MOVE_TO_RESOURCE' : 'IDLE';
+        if (w.inventory > 0 && w.targetResource) {
+            bucket.storage[w.targetResource.key] += w.inventory;
+            w.inventory = 0;
+            w.state = w.targetResource.value > 0 ? 'MOVE_TO_RESOURCE' : 'IDLE';
         }
     });
 }
@@ -235,7 +229,7 @@ function spawnRandomResource(scene) {
         Phaser.Math.Between(120,520),
         t.key
     );
-    resources.push({ ...t, sprite:s });
+    resources.push({ ...t, sprite:s, max:t.value });
 }
 
 /* =========================
@@ -256,6 +250,27 @@ function update(_,delta) {
 
         if (w.state==='MOVE_TO_RESOURCE' && w.moveTarget)
             moveTowards(w,w.moveTarget,()=>w.state='HARVESTING');
+
+        if (w.state==='HARVESTING' && w.targetResource) {
+            w.harvestTimer += delta;
+            if (w.harvestTimer >= w.targetResource.interval) {
+                w.harvestTimer = 0;
+                const amt = Math.min(
+                    HARVEST_AMOUNT,
+                    w.targetResource.value,
+                    w.maxCarry - w.inventory
+                );
+                w.targetResource.value -= amt;
+                w.inventory += amt;
+
+                if (w.inventory >= w.maxCarry || w.targetResource.value <= 0) {
+                    w.state = 'MOVE_TO_BUCKET';
+                }
+            }
+        }
+
+        if (w.state==='MOVE_TO_BUCKET')
+            moveTowards(w,bucket,()=>w.state='IDLE');
     });
 }
 
@@ -279,7 +294,6 @@ function getFormationTargets(center,count) {
 ========================= */
 function moveTowards(w,t,onArrive) {
     if (!t) return;
-
     const s=w.sprite;
     const dx=t.x-s.x, dy=t.y-s.y;
     const d=Math.hypot(dx,dy);
@@ -293,8 +307,8 @@ function moveTowards(w,t,onArrive) {
     }
 
     s.setVelocity(dx/d*MOVE_SPEED,dy/d*MOVE_SPEED);
-
     const a=Phaser.Math.RadToDeg(Math.atan2(dy,dx));
+
     let dir='down';
     if (a<-157||a>157) dir='left';
     else if (a<-112) dir='upL';
