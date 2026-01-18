@@ -171,11 +171,26 @@ function create() {
     });
 }
 
+this.anims.create({
+    key: 'worker-idle',
+    frames: this.anims.generateFrameNumbers('character', { start: 0, end: 0 }),
+    frameRate: 1,
+    repeat: -1
+});
+
+this.anims.create({
+    key: 'worker-walk',
+    frames: this.anims.generateFrameNumbers('character', { start: 1, end: 4 }),
+    frameRate: 8,
+    repeat: -1
+});
+    
 /* =========================
    SPAWNERS
 ========================= */
 function spawnWorker(scene, x, y) {
-    const sprite = scene.physics.add.sprite(x, y, 'character', 0);
+   const sprite = scene.physics.add.sprite(x, y, 'character', 0);
+    sprite.play('worker-idle');
 
     const worker = {
         sprite,
@@ -277,11 +292,21 @@ function moveTowards(sprite, target, onArrive) {
     const dx = target.x - sprite.x;
     const dy = target.y - sprite.y;
     const d = Math.hypot(dx, dy);
+
     if (d < 5) {
         sprite.setVelocity(0);
+
+        if (sprite.anims.currentAnim?.key !== 'worker-idle') {
+            sprite.play('worker-idle');
+        }
+
         onArrive?.();
     } else {
         sprite.setVelocity(dx/d * MOVE_SPEED, dy/d * MOVE_SPEED);
+
+        if (sprite.anims.currentAnim?.key !== 'worker-walk') {
+            sprite.play('worker-walk');
+        }
     }
 }
 
