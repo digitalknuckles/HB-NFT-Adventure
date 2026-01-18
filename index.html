@@ -77,7 +77,10 @@ function preload() {
     this.load.image('rock', 'assets/rock.png');
     this.load.image('crystal', 'assets/crystal.png');
     this.load.image('bucket', 'assets/bucket.png');
-    this.load.spritesheet('character','assets/character.png',{ frameWidth:32, frameHeight:32 });
+    this.load.spritesheet('character','assets/character.png',{
+        frameWidth: 32,
+        frameHeight: 32
+    });
 }
 
 /* =========================
@@ -86,18 +89,24 @@ function preload() {
 function create() {
     this.add.image(400, 300, 'background').setDepth(-10);
 
-    /* ---- ANIMATIONS (FIXED LOCATION) ---- */
+    /* --- ANIMATIONS (FIXED) --- */
     this.anims.create({
         key: 'worker-idle',
-        frames: [{ key: 'character', frame: 0 }],
-        frameRate: 1,
+        frames: this.anims.generateFrameNumbers('character', {
+            start: 0,
+            end: 7
+        }),
+        frameRate: 4,
         repeat: -1
     });
 
     this.anims.create({
         key: 'worker-walk',
-        frames: this.anims.generateFrameNumbers('character', { start: 1, end: 4 }),
-        frameRate: 8,
+        frames: this.anims.generateFrameNumbers('character', {
+            start: 8,
+            end: 15
+        }),
+        frameRate: 10,
         repeat: -1
     });
 
@@ -133,8 +142,7 @@ function create() {
     });
 
     this.input.on('pointerup', p => {
-        if (p.rightButtonDown()) return;
-        if (!dragStart) return;
+        if (p.rightButtonDown() || !dragStart) return;
 
         const rect = new Phaser.Geom.Rectangle(
             Math.min(dragStart.x, p.worldX),
@@ -170,27 +178,13 @@ function create() {
             }
         });
     });
-
-    /* ---- BUY WORKER ---- */
-    buyBtn = this.add.rectangle(700, 50, 90, 30, 0x4444ff).setInteractive();
-    buyText = this.add.text(655, 42, 'Buy Worker', { font: '14px Arial', fill: '#fff' });
-    buyBtn.cooldown = 0;
-
-    buyBtn.on('pointerdown', () => {
-        if (buyBtn.cooldown > 0) return;
-        if (bucket.storage.crystal < WORKER_COST) return;
-
-        bucket.storage.crystal -= WORKER_COST;
-        spawnWorker(this, buyBtn.x - 40, buyBtn.y + 60);
-        buyBtn.cooldown = WORKER_COOLDOWN;
-    });
 }
 
 /* =========================
    SPAWNERS
 ========================= */
 function spawnWorker(scene, x, y) {
-    const sprite = scene.physics.add.sprite(x, y, 'character', 0);
+    const sprite = scene.physics.add.sprite(x, y, 'character');
     sprite.play('worker-idle');
 
     const worker = {
@@ -211,11 +205,10 @@ function spawnWorker(scene, x, y) {
             bucket.storage[worker.harvestingType] += worker.inventory;
             worker.inventory = 0;
 
-            if (worker.targetResource && worker.targetResource.value > 0) {
+            if (worker.targetResource?.value > 0)
                 worker.state = 'MOVE_TO_RESOURCE';
-            } else {
+            else
                 worker.state = 'IDLE';
-            }
         }
     });
 }
@@ -229,17 +222,7 @@ function spawnRandomResource(scene) {
     );
 
     const bar = scene.add.graphics();
-    const res = {
-        sprite,
-        type: t.key,   // ✅ FIXED
-        value: t.value,
-        max: t.value,
-        interval: t.interval,
-        timer: 0,
-        bar
-    };
-
-    resources.push(res);
+    resources.push({ ...t, sprite, bar, max: t.value, timer: 0 });
 }
 
 /* =========================
@@ -251,45 +234,37 @@ function update(time, delta) {
         `ROCK: ${bucket.storage.rock}\n` +
         `CRYSTAL: ${bucket.storage.crystal}`;
 
-    if (buyBtn.cooldown > 0) buyBtn.cooldown -= delta;
-
     workers.forEach(w => {
         const s = w.sprite;
+
         s.setTint(selectedWorkers.includes(w) ? 0x00ff00 : 0xffffff);
 
-        if (w.state === 'MOVE') {
+        if (w.state === 'MOVE')
             moveTowards(s, w.moveTarget, () => w.state='IDLE');
-        }
 
-        if (w.state === 'MOVE_TO_RESOURCE') {
+        if (w.state === 'MOVE_TO_RESOURCE')
             moveTowards(s, w.targetResource.sprite, () => {
-                w.harvestingType = w.targetResource.type;
+                w.harvestingType = w.targetResource.key;
                 w.state = 'HARVESTING';
             });
-        }
 
         if (w.state === 'HARVESTING') {
             const r = w.targetResource;
             w.harvestTimer += delta;
-            drawBar(r);
 
             if (w.harvestTimer >= r.interval) {
                 w.harvestTimer = 0;
                 const amt = Math.min(5, r.value, w.maxCarry - w.inventory);
                 r.value -= amt;
                 w.inventory += amt;
-                r.sprite.setScale(r.value / r.max);
 
                 if (w.inventory >= w.maxCarry || r.value <= 0)
                     w.state = 'MOVE_TO_BUCKET';
-
-                if (r.value <= 0) destroyResource(r);
             }
         }
 
-        if (w.state === 'MOVE_TO_BUCKET') {
+        if (w.state === 'MOVE_TO_BUCKET')
             moveTowards(s, bucket, () => w.state='IDLE');
-        }
     });
 }
 
@@ -308,20 +283,8 @@ function moveTowards(sprite, target, onArrive) {
     } else {
         sprite.setVelocity(dx/d * MOVE_SPEED, dy/d * MOVE_SPEED);
         sprite.play('worker-walk', true);
+        sprite.setFlipX(dx < 0);
     }
-}
-
-function drawBar(r) {
-    r.bar.clear();
-    r.bar.fillStyle(0x00ff00);
-    r.bar.fillRect(r.sprite.x-20, r.sprite.y-30, 40*(r.value/r.max), 5);
-}
-
-function destroyResource(r) {
-    r.bar.destroy();
-    r.sprite.destroy();
-    resources = resources.filter(x=>x!==r);
-    spawnRandomResource(r.sprite.scene);
 }
 </script>
 </body>
